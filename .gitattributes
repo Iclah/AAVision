@@ -1,0 +1,27 @@
+# Normalize all text files to LF in the repository. These files run inside
+# Linux containers and via bash/Nextflow, where CRLF endings break scripts and
+# parsing. This guarantees consistent endings regardless of the OS a
+# contributor edits on (e.g. Windows/WSL).
+* text=auto eol=lf
+
+# Explicitly mark source and config as LF text.
+*.py      text eol=lf
+*.nf      text eol=lf
+*.config  text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.md      text eol=lf
+*.csv     text eol=lf
+*.sh      text eol=lf
+Dockerfile      text eol=lf
+*.dockerfile    text eol=lf
+
+# Binary files: never touch their bytes (line-ending conversion would corrupt).
+*.gz      binary
+*.bam     binary
+*.bai     binary
+*.png     binary
+*.pdf     binary
+*.fasta   binary
+*.fa      binary
+*.fastq   binary

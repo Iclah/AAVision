@@ -1,0 +1,3 @@
+sample,fastq,vector,backbone,helper,host,rep_cap,spike_in
+vKUL156,/data/run1/samples/vKUL156/fastq_pass,/data/refs/vector.fasta,/data/refs/backbone.fasta,/data/refs/helper.fasta,/data/refs/host.fasta,/data/refs/rep_cap.fasta,
+vKUL157,/data/run1/samples/vKUL157/fastq_pass,/data/refs/vector.fasta,/data/refs/backbone.fasta,/data/refs/helper.fasta,/data/refs/host.fasta,,

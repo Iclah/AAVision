@@ -1,0 +1,19 @@
+# Internal development notes — not for publication
+.dev_notes/
+
+# Nextflow run artifacts
+work/
+.nextflow/
+.nextflow.log*
+results/
+results_nf/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# OS / editor
+.DS_Store
+*.swp
+*:Zone.Identifier
