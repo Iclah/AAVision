@@ -19,21 +19,41 @@ No other local installation is required — the tools live in the container.
 
 ## Quick start
 
-The workflow pulls its container image automatically, so no build step is
-needed. Just create a samplesheet (see [Samplesheet](#samplesheet)) and run:
+You need [Nextflow](https://www.nextflow.io/) and [Docker](https://www.docker.com/)
+installed and running (see [Requirements](#requirements)). Everything else — the
+pipeline code and the analysis container — is fetched automatically.
+
+Create a samplesheet (see [Samplesheet](#samplesheet)), then run the pipeline
+straight from GitHub:
 
 ```bash
-nextflow run main.nf -profile docker \
+nextflow run Iclah/AAVision -r v1.0.0 -profile docker \
   --input samplesheet.csv \
   --outdir results \
   --min-length 300
 ```
 
-The interactive report is written to `results/<sample>/analysis_report.html`.
+`-r v1.0.0` pins a specific release. On the first run, Nextflow downloads the
+pipeline and pulls the container image (`ghcr.io/iclah/aavision:1.0.0`)
+automatically; there is no build or manual install step. The interactive report
+is written to `results/<sample>/analysis_report.html`.
 
-By default the workflow uses the published image
-`ghcr.io/iclah/aavision:1.0.0`. To develop against a locally built image
-instead, build it and override the container:
+### Running from a local clone
+
+If you prefer to clone the repository (or want to modify the workflow), run
+`main.nf` directly instead:
+
+```bash
+git clone https://github.com/Iclah/AAVision.git
+cd AAVision
+nextflow run main.nf -profile docker \
+  --input samplesheet.csv --outdir results --min-length 300
+```
+
+### Developing against a local image
+
+By default the workflow uses the published image. To build and use a local
+image instead, override the container:
 
 ```bash
 docker build -t aavision:dev -f AAV_analyzer.dockerfile .
