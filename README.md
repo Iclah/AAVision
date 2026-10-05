@@ -6,7 +6,7 @@ adeno-associated virus (rAAV) preparations from Oxford Nanopore sequencing.
 It aligns reads to the vector and reference sequences, classifies them
 (rAAV / hybrid / impurity), quantifies truncation hotspots and read-length
 distributions, optionally performs taxonomic classification of unmapped reads
-with Kraken2/Bracken, and produces an interactive HTML report.
+with Kraken2/Bracken, and produces an interactive HTML report. **[View an example report](https://iclah.github.io/AAVision/example_report.html)**
 
 ## Requirements
 
@@ -143,7 +143,8 @@ The HTML report includes overall classification statistics (rAAV / hybrid /
 impurity), a read-distribution table and pie chart, read-length histograms,
 per-reference coverage, a truncation-hotspot plot, and — when taxonomy is
 enabled — a taxonomic breakdown of unmapped reads. Charts render client-side
-with Plotly, so viewing the report requires an internet connection.
+with Plotly, so viewing the report requires an internet connection. An example report is available at
+[iclah.github.io/AAVision/example_report.html](https://iclah.github.io/AAVision/example_report.html).
 
 ## Method
 
