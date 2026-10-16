@@ -51,7 +51,8 @@ def align_reads(fastq_file: str, reference_fasta: str, output_sam: str,
     # -Y: soft-clip supplementary alignments (minimap2 hard-clips them by
     # default). Supplementary records then carry the full read SEQ and length,
     # so IGV shows full read context and CIGAR-based read lengths are correct
-    # for every record. HQ/LQ does not depend on this: it uses primaries only.
+    # for every record. HQ/LQ and the hybrid read-side check do not depend on
+    # this: read_interval gives the same result for hard- and soft-clipped records.
     cmd = [
         'minimap2',
         '-ax', 'map-ont',
