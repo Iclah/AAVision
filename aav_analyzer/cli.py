@@ -381,6 +381,9 @@ def _write_summary_txt(stats, out_txt):
                 f"({stats['vector_percent']:.2f}%)\n")
         f.write(f"    - High quality: {stats['vector_hq']:,}\n")
         f.write(f"    - Low quality: {stats.get('vector_lq_pure', stats.get('vector_lq', 0)):,}\n")
+        if 'lq_shared_only_total' in stats:
+            f.write(f"      (of which aligned only in vector-shared regions: "
+                    f"{stats['lq_shared_only_total']:,})\n")
         f.write(f"  Hybrid reads: {stats['total_hybrid']:,} "
                 f"({stats['hybrid_percent']:.2f}%)\n")
         for key in ['backbone', 'helper', 'host', 'rep_cap']:
