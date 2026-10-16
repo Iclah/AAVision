@@ -180,7 +180,8 @@ def cmd_classify_hq_lq(args):
 
     # filter_reads_by_coverage writes HQ; create_fastq_difference makes LQ
     hq_count = alignment.filter_reads_by_coverage(
-        args.sam, args.vector_fastq, args.out_hq, args.min_coverage
+        args.sam, args.vector_fastq, args.out_hq, args.min_coverage,
+        args.snapback_overlap
     )
     lq_count = alignment.create_fastq_difference(
         args.vector_fastq, args.out_hq, args.out_lq

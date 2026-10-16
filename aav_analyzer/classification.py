@@ -126,8 +126,9 @@ def get_classification_stats(output_files: Dict[str, str]) -> Dict[str, int]:
     return stats
 
 
-def classify_vector_reads(vector_sam: str, vector_fastq: str, 
-                         output_dir: str, min_coverage: float = 0.9) -> tuple:
+def classify_vector_reads(vector_sam: str, vector_fastq: str,
+                         output_dir: str, min_coverage: float = 0.9,
+                         min_snapback_overlap: int = 200) -> tuple:
     """
     Classify vector reads into high-quality and low-quality based on coverage.
     
@@ -135,7 +136,9 @@ def classify_vector_reads(vector_sam: str, vector_fastq: str,
         vector_sam: SAM file from vector alignment
         vector_fastq: FASTQ file with mapped vector reads
         output_dir: Output directory for classified reads
-        min_coverage: Minimum coverage threshold for HQ reads
+        min_coverage: Minimum merged primary+supplementary read coverage for HQ
+        min_snapback_overlap: Opposite-strand reference overlap (bp) that makes
+            a read a snapback (LQ)
         
     Returns:
         Tuple of (HQ_fastq_path, LQ_fastq_path, HQ_count, LQ_count)
@@ -147,8 +150,10 @@ def classify_vector_reads(vector_sam: str, vector_fastq: str,
     hq_fastq = os.path.join(output_dir, 'vector_HQ.fastq')
     lq_fastq = os.path.join(output_dir, 'vector_LQ.fastq')
     
-    # HQ: primary alignment covers >= min_coverage of the read
-    hq_count = filter_reads_by_coverage(vector_sam, vector_fastq, hq_fastq, min_coverage)
+    # HQ: primary + supplementary cover >= min_coverage of the read, not a snapback
+    hq_count = filter_reads_by_coverage(
+        vector_sam, vector_fastq, hq_fastq, min_coverage, min_snapback_overlap
+    )
     
     # Create low-quality reads (vector_mapped - HQ)
     lq_count = create_fastq_difference(vector_fastq, hq_fastq, lq_fastq)

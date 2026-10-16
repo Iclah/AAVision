@@ -8,7 +8,9 @@ the full read sequence.
 Which records each step uses:
 - vector.fastq (samtools fastq -F 2308): primary alignments only, written in
   the read's original orientation.
-- HQ/LQ split (filter_reads_by_coverage): primary alignments only.
+- HQ/LQ split (filter_reads_by_coverage): primary + supplementary, merged in
+  read coordinates; opposite-strand records overlapping on the vector mark a
+  snapback, which is LQ (docs/DECISIONS.md).
 - vector.bam (-F 260): primary + supplementary, no secondary. Used for IGV,
   for the samtools-depth coverage plot (which counts supplementary records),
   and for truncation hotspots (which skip supplementary records).
@@ -28,6 +30,8 @@ import pysam
 import subprocess
 from typing import Tuple, List
 from collections import defaultdict
+
+from .utils import merge_intervals
 
 
 def align_reads(fastq_file: str, reference_fasta: str, output_sam: str, 
@@ -188,69 +192,112 @@ def extract_mapped_reads(sam_file: str, output_fastq: str) -> int:
     return read_count
 
 
-def calculate_alignment_coverage(read) -> float:
+def read_interval(read) -> tuple[int, int]:
     """
-    Fraction of the full read that one alignment record covers.
+    The part of the ORIGINAL read (FASTQ orientation) that one record covers.
 
-    Coverage = read bases in M/I/=/X operations / full read length, where the
-    full read length is taken from the CIGAR including hard clips
-    (pysam infer_read_length). Including hard clips matters: minimap2 without
-    -Y hard-clips supplementary records, so query_length alone would make
-    every supplementary record look like it covers 100% of the read.
+    In SAM record orientation the covered part starts after the leading clips
+    (H and S) and spans the query-consuming aligned bases (M, I, =, X).
+    Minus-strand records store the reverse complement, so their interval is
+    flipped: (L - end, L - start), with L the full read length including hard
+    clips (pysam infer_read_length; query_length excludes hard clips). Hard-
+    and soft-clipped copies of the same record give the same interval, so the
+    result does not depend on minimap2 -Y.
 
-    Deletions (D/N) consume reference only and do not lower coverage: a read
-    with a large internal deletion bridged by one alignment scores 1.0. This
-    is intended (docs/DECISIONS.md). No positions are involved.
+    Deletions (D/N) consume reference only and do not shrink the interval: a
+    read with a large internal deletion bridged by one alignment covers the
+    whole read (docs/DECISIONS.md).
 
     Args:
-        read: pysam AlignedSegment (mapped, with a CIGAR)
+        read: Mapped pysam AlignedSegment with a CIGAR
 
     Returns:
-        Coverage in [0.0, 1.0]; 0.0 if the read has no CIGAR
+        (start, end), 0-based half-open, in original read coordinates
     """
-    read_length = read.infer_read_length()
-    if not read_length or not read.cigartuples:
-        return 0.0
-
+    cigar = read.cigartuples
+    lead = 0
+    for op, length in cigar:
+        if op not in (4, 5):  # S, H
+            break
+        lead += length
     # 0=M, 1=I, 7='=', 8=X consume query bases that are aligned
-    aligned_length = sum(length for op, length in read.cigartuples if op in (0, 1, 7, 8))
-    return aligned_length / read_length
+    aligned = sum(length for op, length in cigar if op in (0, 1, 7, 8))
+    start, end = lead, lead + aligned
+    if read.is_reverse:
+        full = read.infer_read_length()
+        start, end = full - end, full - start
+    return start, end
+
+
+def is_snapback(ref_spans: list[tuple[str, int, int, bool]], min_overlap: int = 200) -> bool:
+    """
+    True if two records of one read lie on opposite strands and overlap on the
+    reference by at least min_overlap bases (inclusive).
+
+    A snapback (a vector region followed by its own reverse complement) is
+    fully vector but not an intact genome, so it stays LQ. min_overlap should
+    exceed the ITR length (~145 bp) so a flip/flop ITR supplementary on a full
+    genome does not count.
+
+    Args:
+        ref_spans: One (contig, ref_start, ref_end, is_reverse) per record;
+            ref_start/ref_end 0-based half-open
+        min_overlap: Minimum reference overlap in bases
+
+    Returns:
+        True if any opposite-strand pair on the same contig overlaps >= min_overlap
+    """
+    for i, (contig_a, start_a, end_a, rev_a) in enumerate(ref_spans):
+        for contig_b, start_b, end_b, rev_b in ref_spans[i + 1:]:
+            if contig_a != contig_b or rev_a == rev_b:
+                continue
+            if min(end_a, end_b) - max(start_a, start_b) >= min_overlap:
+                return True
+    return False
 
 
 def filter_reads_by_coverage(sam_file: str, vector_fastq: str, output_fastq: str,
-                             min_coverage: float = 0.9) -> int:
+                             min_coverage: float = 0.9,
+                             min_snapback_overlap: int = 200) -> int:
     """
-    Write high-quality (HQ) vector reads: reads whose PRIMARY alignment
-    covers >= min_coverage of the full read.
+    Write high-quality (HQ) vector reads.
 
-    The HQ decision uses the primary record only, once per read. Secondary
-    and supplementary records are ignored, so a split (chimeric) read is
-    judged on its primary alignment whatever order records appear in.
+    A read is HQ if (1) its primary and supplementary vector records together
+    cover >= min_coverage of the full read, and (2) it is not a snapback
+    (is_snapback with min_snapback_overlap). Each record's covered part of the
+    original read (read_interval) is merged with the others, so overlapping
+    pieces count once; the denominator is the full read length including hard
+    clips. Secondary records are ignored. Records may appear in any order.
 
-    HQ reads are copied from vector_fastq (as written by extract_mapped_reads),
-    not rebuilt from SAM records, so they keep their original orientation,
-    full length and qualities. Minus-strand SAM records store the reverse
-    complement, and hard-clipped records store only part of the read.
+    HQ reads are copied from vector_fastq (as written by extract_mapped_reads:
+    the primary records, full read, original orientation), not rebuilt from SAM
+    records. Minus-strand records store the reverse complement, and
+    hard-clipped records store only part of the read.
 
     Args:
         sam_file: Vector alignment SAM/BAM (any record order)
         vector_fastq: FASTQ of all primary-mapped vector reads, original orientation
         output_fastq: Output FASTQ for HQ reads
-        min_coverage: Minimum primary-alignment coverage, inclusive (0.0 to 1.0)
+        min_coverage: Minimum merged read coverage, inclusive (0.0 to 1.0)
+        min_snapback_overlap: Minimum opposite-strand reference overlap (bp,
+            inclusive) that makes a read a snapback
 
     Returns:
         Number of HQ reads written
 
     Raises:
-        ValueError: if an HQ read from the SAM is missing from vector_fastq
-            (inputs out of sync)
+        ValueError: if the records of one read imply different read lengths,
+            if a read has supplementary records but no primary, or if an HQ
+            read from the SAM is missing from vector_fastq (inputs out of sync)
     """
-    logging.info(f"Filtering reads with >={min_coverage*100:.0f}% primary-alignment coverage")
+    logging.info(
+        f"Filtering reads with >={min_coverage*100:.0f}% merged primary+supplementary "
+        f"coverage, excluding snapbacks (opposite-strand overlap >= {min_snapback_overlap} bp)"
+    )
 
-    hq_names = set()
-    n_primary = 0
-    n_lq_with_supp = 0  # LQ reads with an SA tag: promoted to HQ before this fix
-    n_skipped = {'unmapped': 0, 'secondary': 0, 'supplementary': 0}
+    # read name -> [read length, has primary, primary interval, intervals, ref spans]
+    reads = {}
+    n_skipped = {'unmapped': 0, 'secondary': 0}
 
     with pysam.AlignmentFile(sam_file, "r") as samfile:
         for read in samfile:
@@ -260,15 +307,40 @@ def filter_reads_by_coverage(sam_file: str, vector_fastq: str, output_fastq: str
             if read.is_secondary:
                 n_skipped['secondary'] += 1
                 continue
-            if read.is_supplementary:
-                n_skipped['supplementary'] += 1
-                continue
 
-            n_primary += 1
-            if calculate_alignment_coverage(read) >= min_coverage:
-                hq_names.add(read.query_name)
-            elif read.has_tag('SA'):
-                n_lq_with_supp += 1
+            length = read.infer_read_length()
+            interval = read_interval(read)
+            entry = reads.setdefault(read.query_name, [length, False, None, [], []])
+            if entry[0] != length:
+                raise ValueError(
+                    f"Read {read.query_name}: records in {sam_file} imply different "
+                    f"read lengths ({entry[0]} and {length})"
+                )
+            if not read.is_supplementary:
+                entry[1] = True
+                entry[2] = interval
+            entry[3].append(interval)
+            entry[4].append(
+                (read.reference_name, read.reference_start, read.reference_end, read.is_reverse)
+            )
+
+    hq_names = set()
+    n_hq_via_supp = 0  # HQ only because supplementary records add coverage
+    n_snapback = 0  # coverage passed, but LQ as a snapback
+    for name, (length, has_primary, primary, intervals, spans) in reads.items():
+        if not has_primary:
+            raise ValueError(
+                f"Read {name}: supplementary record(s) in {sam_file} but no primary"
+            )
+        covered = sum(end - start for start, end in merge_intervals(intervals))
+        if covered / length < min_coverage:
+            continue
+        if is_snapback(spans, min_snapback_overlap):
+            n_snapback += 1
+            continue
+        hq_names.add(name)
+        if (primary[1] - primary[0]) / length < min_coverage:
+            n_hq_via_supp += 1
 
     read_count = 0
     with open(output_fastq, 'w') as outfile:
@@ -285,10 +357,11 @@ def filter_reads_by_coverage(sam_file: str, vector_fastq: str, output_fastq: str
             f"from {vector_fastq}; were both produced from the same alignment?"
         )
 
+    n_below = len(reads) - read_count - n_snapback
     logging.info(
-        f"Evaluated {n_primary} primary alignments: {read_count} HQ, "
-        f"{n_primary - read_count} below threshold "
-        f"({n_lq_with_supp} of these have supplementary alignments)"
+        f"Evaluated {len(reads)} mapped reads: {read_count} HQ "
+        f"({n_hq_via_supp} only with supplementary coverage), "
+        f"{n_below} LQ below threshold, {n_snapback} LQ as snapback"
     )
     logging.info(
         "Records not used for the HQ decision: "
