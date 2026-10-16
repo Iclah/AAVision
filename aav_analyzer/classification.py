@@ -4,34 +4,68 @@ Classifies hybrid and impurity reads based on alignment scores.
 """
 
 import os
+import json
 import logging
 import pysam
 from typing import Dict, List
 from collections import defaultdict
 
+from .homology import SharedRegions, unique_aligned_bases
 
-def classify_reads_from_bams(bam_files: Dict[str, str], source_fastq: str, 
-                             output_prefix: str, read_type: str = "hybrid") -> Dict[str, str]:
+logger = logging.getLogger(__name__)
+
+
+def classify_reads_from_bams(bam_files: Dict[str, str], source_fastq: str,
+                             output_prefix: str, read_type: str = "hybrid",
+                             shared_regions: SharedRegions | None = None,
+                             min_unique_bases: int = 100) -> Dict[str, str]:
     """
     Classify reads based on best alignment score across multiple BAM files.
-    
+
+    Without shared_regions every mapped record is eligible (v1.0.1 behaviour).
+    With shared_regions (hybrid pass, docs/DECISIONS.md), a reference is
+    eligible for a read only if the read's records on it align at least
+    min_unique_bases reference bases outside that reference's vector-shared
+    regions, summed over its primary and supplementary records
+    (homology.unique_aligned_bases; 0-based half-open intervals, strand
+    ignored). The best eligible reference by AS wins; reads with no eligible
+    reference go to unmapped (pure LQ in the hybrid pass). Rejected
+    (read, reference) pairs are written to {output_prefix}_shared_only.tsv and
+    counts to {output_prefix}_filter_stats.json.
+
     Args:
         bam_files: Dict mapping reference names to BAM file paths
         source_fastq: Source FASTQ file containing reads to classify
         output_prefix: Prefix for output FASTQ files
         read_type: Type of reads being classified ("hybrid" or "impurity")
-        
+        shared_regions: Vector-shared regions per reference, or None to disable
+            the filter. Must have searched every reference in bam_files.
+        min_unique_bases: Minimum aligned reference bases outside shared
+            regions for a reference to be eligible (inclusive)
+
     Returns:
         Dict mapping categories to output FASTQ file paths
+
+    Raises:
+        ValueError: if shared_regions was not searched for a reference in bam_files
     """
     logging.info(f"Classifying {read_type} reads")
-    
-    # Dictionary to store best alignment for each read
-    read_scores = {}
+
+    if shared_regions is not None:
+        unsearched = sorted(set(bam_files) - shared_regions.searched)
+        if unsearched:
+            raise ValueError(
+                f"Shared regions were not computed for reference(s) {unsearched}; "
+                f"searched: {sorted(shared_regions.searched)}"
+            )
+        logger.info(
+            f"Excluding vector-shared regions: a reference counts only with "
+            f">= {min_unique_bases} aligned bases outside them"
+        )
 
     # Process BAMs in a fixed canonical reference order so that tie-breaking
     # (equal alignment scores) is DETERMINISTIC and independent of the order
-    # the BAMs happen to be passed in. The scoring loop below keeps the first
+    # the BAMs happen to be passed in. The selection loop below keeps the first
     # reference seen on a score tie (uses strict <), so the iteration order
     # decides tied reads. Without this sort, the standalone pipeline (fixed
     # dict order) and Nextflow (groupTuple order) could assign tied reads to
@@ -44,26 +78,44 @@ def classify_reads_from_bams(bam_files: Dict[str, str], source_fastq: str,
 
     ordered_items = sorted(bam_files.items(), key=lambda kv: _rank(kv[0]))
 
-    # Parse each BAM file to get alignment scores
+    # read name -> ref name -> [best AS, aligned bases outside shared regions]
+    hits = {}
     for ref_name, bam_file in ordered_items:
         logging.debug(f"Parsing alignments from {ref_name}")
-        bam = pysam.AlignmentFile(bam_file, "rb")
-
-        for read in bam:
-            if not read.is_unmapped:
-                read_name = read.query_name
+        shared = shared_regions.intervals.get(ref_name, {}) if shared_regions else None
+        with pysam.AlignmentFile(bam_file, "rb") as bam:
+            for read in bam:
+                if read.is_unmapped:
+                    continue
                 try:
                     score = read.get_tag("AS")  # Alignment score
                 except KeyError:
                     score = 0
+                hit = hits.setdefault(read.query_name, {}).setdefault(ref_name, [score, 0])
+                hit[0] = max(hit[0], score)
+                if shared is not None:
+                    hit[1] += unique_aligned_bases(read, shared)
 
-                # Keep best score for each read. Strict < means the FIRST
-                # reference (in canonical order) wins on a tie.
-                if read_name not in read_scores or read_scores[read_name][1] < score:
-                    read_scores[read_name] = (ref_name, score)
+    # Best eligible reference per read. Strict < means the FIRST reference
+    # (in canonical order) wins on a tie.
+    read_scores = {}
+    rejected = []  # (read, ref, best AS, unique bases)
+    for read_name, refs in hits.items():
+        for ref_name, _ in ordered_items:
+            if ref_name not in refs:
+                continue
+            score, unique = refs[ref_name]
+            if shared_regions is not None and unique < min_unique_bases:
+                rejected.append((read_name, ref_name, score, unique))
+                continue
+            if read_name not in read_scores or read_scores[read_name][1] < score:
+                read_scores[read_name] = (ref_name, score)
 
-        bam.close()
-    
+    if shared_regions is not None:
+        _write_shared_filter_report(
+            rejected, read_scores, list(bam_files), min_unique_bases, output_prefix
+        )
+
     # Initialize read collections
     categories = list(bam_files.keys()) + ['unmapped']
     reads_classified = {cat: [] for cat in categories}
@@ -102,6 +154,51 @@ def classify_reads_from_bams(bam_files: Dict[str, str], source_fastq: str,
     
     logging.info(f"Classification complete: {len(read_scores)} reads assigned")
     return output_files
+
+
+def _write_shared_filter_report(rejected: list, read_scores: dict, ref_names: list[str],
+                                min_unique_bases: int, output_prefix: str) -> None:
+    """
+    Write {output_prefix}_shared_only.tsv (one row per rejected read/reference
+    pair) and {output_prefix}_filter_stats.json, and log the counts.
+
+    A read is "rescued to LQ" when it had alignments but every one was
+    rejected; it is attributed to the reference of its best rejected AS
+    (canonical order on ties, as rejected is built in that order).
+    """
+    tsv_path = f"{output_prefix}_shared_only.tsv"
+    with open(tsv_path, 'w') as fh:
+        fh.write("read_id\tref_name\tbest_AS\tunique_bases\tfinal_category\n")
+        for read_name, ref_name, score, unique in rejected:
+            final = read_scores[read_name][0] if read_name in read_scores else 'unmapped'
+            fh.write(f"{read_name}\t{ref_name}\t{score}\t{unique}\t{final}\n")
+
+    rejected_by_ref = {ref: 0 for ref in ref_names}
+    best_rejected = {}  # read -> (ref, AS) for reads with no eligible reference
+    for read_name, ref_name, score, _ in rejected:
+        rejected_by_ref[ref_name] += 1
+        if read_name in read_scores:
+            continue
+        if read_name not in best_rejected or best_rejected[read_name][1] < score:
+            best_rejected[read_name] = (ref_name, score)
+    rescued_by_ref = {ref: 0 for ref in ref_names}
+    for ref_name, _ in best_rejected.values():
+        rescued_by_ref[ref_name] += 1
+
+    stats = {
+        'min_unique_bases': min_unique_bases,
+        'rejected_alignments_by_ref': rejected_by_ref,
+        'rescued_to_lq_by_ref': rescued_by_ref,
+        'rescued_to_lq': len(best_rejected),
+    }
+    with open(f"{output_prefix}_filter_stats.json", 'w') as fh:
+        json.dump(stats, fh, indent=2)
+
+    logger.info(
+        f"Shared-region filter: {len(best_rejected)} reads with alignments only "
+        f"inside vector-shared regions stay unassigned ({rescued_by_ref}); "
+        f"rejected (read, reference) pairs: {rejected_by_ref}; details in {tsv_path}"
+    )
 
 
 def get_classification_stats(output_files: Dict[str, str]) -> Dict[str, int]:
