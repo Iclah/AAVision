@@ -25,6 +25,7 @@ from . import truncation
 from . import taxonomy
 from . import report
 from . import utils
+from . import homology
 
 
 # ----------------------------------------------------------------------
@@ -215,6 +216,30 @@ def cmd_align_ref(args):
 
 
 # ----------------------------------------------------------------------
+# Subcommand: ref-homology  (vector-shared regions of the other references)
+# ----------------------------------------------------------------------
+
+def cmd_ref_homology(args):
+    """
+    Find the regions of each reference that share sequence with the vector
+    and write them as BED (0-based half-open) with a '# searched:' header.
+
+    The --ref arguments are 'refname=path' pairs. Per-reference BEDs may be
+    concatenated; classify-best --shared-bed reads them back.
+    """
+    refs = _parse_ref_pairs(args.ref)
+    if not refs:
+        raise ValueError("ref-homology needs at least one --ref name=path")
+
+    _ensure_parent_dir(args.out_bed)
+    regions = homology.compute_shared_regions(
+        args.vector, refs, preset=args.preset, threads=args.threads
+    )
+    homology.write_shared_bed(regions, args.out_bed)
+    return 0
+
+
+# ----------------------------------------------------------------------
 # Subcommand: classify-best  (generic; hybrid or impurity)
 # ----------------------------------------------------------------------
 
@@ -225,7 +250,16 @@ def cmd_classify_best(args):
     Wraps classification.classify_reads_from_bams. The --bams arguments
     are 'refname=path' pairs. Output FASTQs are written as
     {out_prefix}_{refname}.fastq plus {out_prefix}_unmapped.fastq.
+
+    With --shared-bed (hybrid mode only), alignments inside vector-shared
+    regions do not count (see classify_reads_from_bams).
     """
+    shared_bed = getattr(args, 'shared_bed', None)
+    if shared_bed and args.mode != 'hybrid':
+        raise ValueError(
+            f"--shared-bed applies to the hybrid pass only, not mode '{args.mode}'"
+        )
+
     bam_files = _parse_ref_pairs(args.bams)
     if not bam_files:
         logging.error("No BAM files provided to classify-best")
@@ -233,11 +267,14 @@ def cmd_classify_best(args):
 
     _ensure_parent_dir(args.out_prefix + "_x")  # ensure prefix parent exists
 
+    shared_regions = homology.read_shared_bed(shared_bed) if shared_bed else None
     classification.classify_reads_from_bams(
         bam_files,
         args.source_fastq,
         args.out_prefix,
-        args.mode
+        args.mode,
+        shared_regions=shared_regions,
+        min_unique_bases=getattr(args, 'min_unique_bases', 100),
     )
     return 0
 
@@ -491,6 +528,7 @@ HANDLERS = {
     'extract-vector': cmd_extract_vector,
     'classify-hq-lq': cmd_classify_hq_lq,
     'align-ref': cmd_align_ref,
+    'ref-homology': cmd_ref_homology,
     'classify-best': cmd_classify_best,
     'compute-coverage': cmd_compute_coverage,
     'compute-truncation': cmd_compute_truncation,

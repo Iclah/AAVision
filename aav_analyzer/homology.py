@@ -126,6 +126,32 @@ def find_shared_regions(
     return regions
 
 
+def compute_shared_regions(
+    vector_fasta: str, refs: dict[str, str], preset: str = "asm20", threads: int = 1
+) -> SharedRegions:
+    """
+    Run find_shared_regions for every reference.
+
+    Args:
+        vector_fasta: Vector reference FASTA
+        refs: ref_name -> FASTA path (e.g. backbone, helper, host, rep_cap)
+        preset: minimap2 preset (see find_shared_regions)
+        threads: minimap2 threads
+
+    Returns:
+        SharedRegions with every name in refs marked as searched; references
+        without a shared region have no entry in intervals
+    """
+    intervals = {}
+    for ref_name, ref_fasta in refs.items():
+        found = find_shared_regions(
+            vector_fasta, ref_fasta, preset=preset, threads=threads
+        )
+        if found:
+            intervals[ref_name] = found
+    return SharedRegions(searched=frozenset(refs), intervals=intervals)
+
+
 def write_shared_bed(regions: SharedRegions, bed_path: str) -> None:
     """
     Write shared regions as BED (0-based half-open) with a '# searched:' header.

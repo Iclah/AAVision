@@ -8,6 +8,7 @@ compare to its truth table.
 All intervals in this file are 0-based, half-open (BED/PAF/pysam convention).
 """
 
+import argparse
 import csv
 import json
 import os
@@ -17,7 +18,7 @@ import sys
 import pysam
 import pytest
 
-from aav_analyzer import alignment, classification, homology
+from aav_analyzer import alignment, classification, cli, homology
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
@@ -489,3 +490,111 @@ def test_end_to_end_hybrids_match_truth_table(tmp_path):
     unfiltered = classify("unfiltered")
     pure_lq = {r for r, e in expected.items() if e == "LQ"}
     assert all(unfiltered[r].startswith("hybrid_") for r in pure_lq)
+
+
+# ----------------------------------------------------------------------
+# CLI wiring: ref-homology, classify-best --shared-bed, run options
+# ----------------------------------------------------------------------
+
+
+def _classify_best_args(c, bed=None, mode="hybrid", min_unique=100):
+    return argparse.Namespace(
+        bams=[f"{name}={path}" for name, path in c["bams"].items()],
+        source_fastq=c["fastq"],
+        out_prefix=c["prefix"],
+        mode=mode,
+        shared_bed=bed,
+        min_unique_bases=min_unique,
+    )
+
+
+def test_cli_classify_best_with_shared_bed(bam_case, tmp_path):
+    c = bam_case
+    bed = tmp_path / "shared.bed"
+    homology.write_shared_bed(c["shared"], str(bed))
+    assert cli.cmd_classify_best(_classify_best_args(c, str(bed))) == 0
+    assert read_fastq_names(c["prefix"] + "_backbone.fastq") == {
+        "spans",
+        "at_threshold",
+        "supp_sum",
+        "minus_spans",
+    }
+    assert os.path.exists(c["prefix"] + "_filter_stats.json")
+
+
+def test_cli_classify_best_without_shared_bed_is_unfiltered(bam_case):
+    c = bam_case
+    assert cli.cmd_classify_best(_classify_best_args(c)) == 0
+    assert "shared_only" in read_fastq_names(c["prefix"] + "_backbone.fastq")
+    assert not os.path.exists(c["prefix"] + "_filter_stats.json")
+
+
+def test_cli_classify_best_shared_bed_rejected_for_impurity(bam_case, tmp_path):
+    c = bam_case
+    bed = tmp_path / "shared.bed"
+    homology.write_shared_bed(c["shared"], str(bed))
+    with pytest.raises(ValueError, match="hybrid"):
+        cli.cmd_classify_best(_classify_best_args(c, str(bed), mode="impurity"))
+
+
+def test_run_and_step_parsers_have_hybrid_options(monkeypatch):
+    import aav_analyze
+
+    monkeypatch.setattr(sys, "argv", ["aav_analyze.py", "run", "--run-dir", "x"])
+    args = aav_analyze.parse_arguments()
+    assert (args.hybrid_min_unique, args.homology_preset) == (100, "asm20")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "aav_analyze.py",
+            "ref-homology",
+            "--vector",
+            "v.fa",
+            "--ref",
+            "backbone=b.fa",
+            "--out-bed",
+            "o.bed",
+        ],
+    )
+    args = aav_analyze.parse_arguments()
+    assert (args.preset, args.ref) == ("asm20", ["backbone=b.fa"])
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "aav_analyze.py",
+            "classify-best",
+            "--bams",
+            "backbone=b.bam",
+            "--source-fastq",
+            "s.fq",
+            "--out-prefix",
+            "p",
+        ],
+    )
+    args = aav_analyze.parse_arguments()
+    assert (args.shared_bed, args.min_unique_bases) == (None, 100)
+
+
+@pytest.mark.slow
+@_needs_tools
+def test_compute_shared_regions_and_cli_bed(tmp_path):
+    paths = make_hybrid_testdata.generate(str(tmp_path / "data"))
+    refs = {ref: paths[ref] for ref in _OTHER_REFS}
+    regions = homology.compute_shared_regions(paths["vector"], refs, preset="asm20")
+    assert regions.searched == frozenset(_OTHER_REFS)
+    assert set(regions.intervals) == {"backbone", "host"}  # helper shares nothing
+
+    bed = tmp_path / "shared.bed"
+    args = argparse.Namespace(
+        vector=paths["vector"],
+        ref=[f"{name}={path}" for name, path in refs.items()],
+        preset="asm20",
+        threads=1,
+        out_bed=str(bed),
+    )
+    assert cli.cmd_ref_homology(args) == 0
+    assert homology.read_shared_bed(str(bed)) == regions
