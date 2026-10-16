@@ -26,7 +26,7 @@ from typing import List, Dict, Optional
 
 # Import modules (assuming they're in aav_analyzer package)
 try:
-    from aav_analyzer import utils, alignment, classification, truncation, report, taxonomy
+    from aav_analyzer import utils, alignment, classification, truncation, report, taxonomy, homology
 except ImportError:
     # Fallback for standalone script
     import utils
@@ -35,6 +35,7 @@ except ImportError:
     import truncation
     import report
     import taxonomy
+    import homology
 
 
 def _add_run_subparser(subparsers):
@@ -82,6 +83,12 @@ Expected run directory layout:
     p.add_argument('--snapback-overlap', type=int, default=200,
                    help='Opposite-strand vector overlap (bp) that makes a read a '
                         'snapback, which is LQ (default: 200, above ITR length)')
+    p.add_argument('--hybrid-min-unique', type=int, default=100,
+                   help='Minimum aligned bases outside vector-shared regions for '
+                        'an LQ read to count as a hybrid (default: 100)')
+    p.add_argument('--homology-preset', default='asm20',
+                   help='minimap2 preset for finding vector-shared regions in the '
+                        'other references (default: asm20)')
     p.add_argument('--min-length', type=int, default=0,
                    help='Minimum read length filter in bp (default: 0 = off). '
                         'Filtered reads go to merged.filtered.fastq.gz; '
@@ -161,6 +168,16 @@ def _add_step_subparsers(subparsers):
     p.add_argument('--out-bam', required=True)
     p.add_argument('--threads', type=int, default=4)
 
+    # ref-homology
+    p = subparsers.add_parser('ref-homology',
+                              help='Find reference regions shared with the vector -> BED')
+    p.add_argument('--vector', required=True)
+    p.add_argument('--ref', nargs='+', required=True,
+                   help="One or more 'refname=path' pairs")
+    p.add_argument('--preset', default='asm20')
+    p.add_argument('--threads', type=int, default=1)
+    p.add_argument('--out-bed', required=True)
+
     # classify-best (generic)
     p = subparsers.add_parser('classify-best',
                               help='Assign reads to best-matching reference across BAMs')
@@ -169,6 +186,9 @@ def _add_step_subparsers(subparsers):
     p.add_argument('--source-fastq', required=True)
     p.add_argument('--out-prefix', required=True)
     p.add_argument('--mode', default='hybrid', choices=['hybrid', 'impurity'])
+    p.add_argument('--shared-bed', default=None,
+                   help='Vector-shared regions from ref-homology (hybrid mode only)')
+    p.add_argument('--min-unique-bases', type=int, default=100)
 
     # compute-coverage
     p = subparsers.add_parser('compute-coverage',
@@ -259,6 +279,7 @@ Subcommands:
   extract-vector    Extract mapped/unmapped reads, build vector BAM
   classify-hq-lq    Split vector reads into HQ/LQ by coverage
   align-ref         Align reads to a single reference -> sorted BAM
+  ref-homology      Find reference regions shared with the vector -> BED
   classify-best     Assign reads to best-matching reference across BAMs
   compute-coverage  Per-position coverage for one BAM
   compute-truncation  Truncation hotspots for the vector BAM
@@ -292,7 +313,9 @@ def analyze_single_sample(fastq_path: str, sample_name: str, output_dir: str,
                           kraken_confidence: float = 0.05,
                           bracken_level: str = 'S',
                           bracken_threshold: int = 10,
-                          snapback_overlap: int = 200) -> dict:
+                          snapback_overlap: int = 200,
+                          hybrid_min_unique: int = 100,
+                          homology_preset: str = 'asm20') -> dict:
     """
     Run full analysis pipeline for a single sample.
     
@@ -303,6 +326,8 @@ def analyze_single_sample(fastq_path: str, sample_name: str, output_dir: str,
         refs: Dictionary of reference file paths
         quality: Minimum coverage threshold (0-100)
         snapback_overlap: Opposite-strand vector overlap (bp) that makes a read a snapback (LQ)
+        hybrid_min_unique: Minimum aligned bases outside vector-shared regions for a hybrid
+        homology_preset: minimap2 preset for finding vector-shared regions
         threads: Number of threads for alignment
         verbose: Enable verbose logging
         kraken_db: Path to Kraken2 database (optional, skips taxonomy if None)
@@ -364,8 +389,20 @@ def analyze_single_sample(fastq_path: str, sample_name: str, output_dir: str,
     # Align to multiple references
     hybrid_bams = alignment.align_to_multiple_references(lq_fastq, hybrid_refs, hybrid_bam_prefix, threads)
     
+    # Regions of the other references that share sequence with the vector:
+    # LQ reads aligning only there are pure vector, not hybrids
+    homology_dir = os.path.join(output_dir, 'homology')
+    os.makedirs(homology_dir, exist_ok=True)
+    shared_regions = homology.compute_shared_regions(
+        refs['vector'], hybrid_refs, preset=homology_preset, threads=threads
+    )
+    homology.write_shared_bed(shared_regions, os.path.join(homology_dir, 'shared_regions.bed'))
+
     # Classify reads directly to fastq directory
-    hybrid_files = classification.classify_reads_from_bams(hybrid_bams, lq_fastq, hybrid_fastq_prefix, "hybrid")
+    hybrid_files = classification.classify_reads_from_bams(
+        hybrid_bams, lq_fastq, hybrid_fastq_prefix, "hybrid",
+        shared_regions=shared_regions, min_unique_bases=hybrid_min_unique
+    )
     
     log.info(f"Hybrid classification complete: {len(hybrid_files)} categories")
     
@@ -691,6 +728,7 @@ def run_pipeline(args):
     print(f"Number of samples:   {len(samples)}")
     print(f"Coverage threshold:  {args.quality}%")
     print(f"Snapback overlap:    {args.snapback_overlap} bp")
+    print(f"Hybrid min unique:   {args.hybrid_min_unique} bp (homology preset {args.homology_preset})")
     print(f"Threads:             {args.threads}")
     if args.kraken_db:
         print(f"Kraken2 database:    {args.kraken_db}")
@@ -772,7 +810,9 @@ def run_pipeline(args):
                 kraken_confidence=args.kraken_confidence,
                 bracken_level=args.bracken_level,
                 bracken_threshold=args.bracken_threshold,
-                snapback_overlap=args.snapback_overlap
+                snapback_overlap=args.snapback_overlap,
+                hybrid_min_unique=args.hybrid_min_unique,
+                homology_preset=args.homology_preset
             )
 
             sample_elapsed = time.time() - sample_start_time
