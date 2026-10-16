@@ -1,5 +1,13 @@
 # Internal development notes — not for publication
 .dev_notes/
+docs/DECISIONS.md
+
+# Test suite and its synthetic data generators — kept local, not published
+tests/
+pytest.ini
+scripts/make_hq_lq_testdata.py
+scripts/make_hybrid_testdata.py
+.pytest_cache/
 
 # Nextflow run artifacts
 work/
