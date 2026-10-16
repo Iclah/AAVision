@@ -380,5 +380,18 @@ def summarize_classification(fastq_dir: str, optional_refs: List[str] = None) ->
         counts['vector_percent'] = (counts['total_vector'] / counts['total_reads']) * 100
         counts['hybrid_percent'] = (counts['total_hybrid'] / counts['total_reads']) * 100
         counts['impurity_percent'] = (counts['total_impurity'] / counts['total_reads']) * 100
-    
+
+    # Shared-region hybrid filter (hybrid_filter_stats.json from
+    # classify_reads_from_bams): LQ reads that aligned to a reference only in
+    # vector-shared regions and so stayed pure LQ. Added after the totals, and
+    # named without 'hybrid'/'impurity', so the substring sums above ignore them.
+    filter_stats_path = os.path.join(fastq_dir, 'hybrid_filter_stats.json')
+    if os.path.exists(filter_stats_path):
+        with open(filter_stats_path) as fh:
+            filter_stats = json.load(fh)
+        for ref, n in filter_stats['rescued_to_lq_by_ref'].items():
+            counts[f'lq_shared_only_{ref}'] = n
+        counts['lq_shared_only_total'] = filter_stats['rescued_to_lq']
+        counts['shared_filter_min_unique_bases'] = filter_stats['min_unique_bases']
+
     return counts

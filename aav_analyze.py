@@ -448,6 +448,9 @@ def analyze_single_sample(fastq_path: str, sample_name: str, output_dir: str,
         f.write(f"  Vector reads: {stats['total_vector']:,} ({stats['vector_percent']:.2f}%)\n")
         f.write(f"    - High quality: {stats['vector_hq']:,}\n")
         f.write(f"    - Low quality: {stats['vector_lq_pure']:,}\n")
+        if 'lq_shared_only_total' in stats:
+            f.write(f"      (of which aligned only in vector-shared regions: "
+                    f"{stats['lq_shared_only_total']:,})\n")
         f.write(f"  Hybrid reads: {stats['total_hybrid']:,} ({stats['hybrid_percent']:.2f}%)\n")
         
         # Add hybrid breakdown

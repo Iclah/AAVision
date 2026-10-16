@@ -373,7 +373,8 @@ workflow {
     }
 
     // --- Step 13: SUMMARIZE — aggregate classification stats ---
-    // Stage HQ, LQ, all hybrid FASTQs and all impurity FASTQs into one task.
+    // Stage HQ, LQ, all hybrid FASTQs, all impurity FASTQs and the hybrid
+    // shared-region filter counts into one task.
     // optional_refs (which of rep_cap/spike_in this sample has) is derived
     // per-sample from its refs map and threaded through the channel.
     hybrid_fastqs_ch = CLASSIFY_BEST.out.classified
@@ -394,9 +395,10 @@ workflow {
         .join(CLASSIFY_HQ_LQ.out.lq)
         .join(hybrid_fastqs_ch)
         .join(impurity_fastqs_for_sum)
+        .join(CLASSIFY_BEST.out.filter_stats)
         .join(optional_refs_ch)
-        .map { meta, hq, lq, hybrid_fqs, impurity_fqs, opt ->
-            tuple(meta, hq, lq, hybrid_fqs, impurity_fqs, opt)
+        .map { meta, hq, lq, hybrid_fqs, impurity_fqs, filter_stats, opt ->
+            tuple(meta, hq, lq, hybrid_fqs, impurity_fqs, filter_stats, opt)
         }
 
     SUMMARIZE(summarize_in)

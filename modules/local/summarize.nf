@@ -1,6 +1,7 @@
 // SUMMARIZE: aggregate classification counts from the categorized FASTQs into
 // classification_stats.json and summary.txt. All FASTQs are staged into the
-// task dir and counted from there.
+// task dir and counted from there, together with hybrid_filter_stats.json
+// (shared-region filter counts).
 
 process SUMMARIZE {
     tag "${meta.id}"
@@ -12,7 +13,7 @@ process SUMMARIZE {
     time   1.h
 
     input:
-    tuple val(meta), path(hq), path(lq), path(hybrid_fastqs), path(impurity_fastqs), val(optional_refs)
+    tuple val(meta), path(hq), path(lq), path(hybrid_fastqs), path(impurity_fastqs), path(filter_stats), val(optional_refs)
 
     output:
     tuple val(meta), path("classification_stats.json"), emit: stats

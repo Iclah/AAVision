@@ -598,3 +598,71 @@ def test_compute_shared_regions_and_cli_bed(tmp_path):
     )
     assert cli.cmd_ref_homology(args) == 0
     assert homology.read_shared_bed(str(bed)) == regions
+
+
+# ----------------------------------------------------------------------
+# SUMMARIZE: shared-region filter counts in the classification stats
+# ----------------------------------------------------------------------
+
+
+def _fastq_dir_with_filter_stats(tmp_path, with_stats=True):
+    """Classified FASTQs (2 LQ, 1 of them a backbone hybrid) plus filter stats."""
+    d = tmp_path / "fastq"
+    d.mkdir()
+    write_fastq(d / "vector_HQ.fastq", ["hq1"])
+    write_fastq(d / "vector_LQ.fastq", ["lq1", "lq2"])
+    write_fastq(d / "hybrid_backbone.fastq", ["lq1"])
+    for name in (
+        "hybrid_helper",
+        "hybrid_host",
+        "impurity_backbone",
+        "impurity_helper",
+        "impurity_host",
+    ):
+        (d / f"{name}.fastq").write_text("")
+    if with_stats:
+        (d / "hybrid_filter_stats.json").write_text(
+            json.dumps(
+                {
+                    "min_unique_bases": 100,
+                    "rejected_alignments_by_ref": {
+                        "backbone": 2,
+                        "helper": 0,
+                        "host": 1,
+                    },
+                    "rescued_to_lq_by_ref": {"backbone": 1, "helper": 0, "host": 0},
+                    "rescued_to_lq": 1,
+                }
+            )
+        )
+    return str(d)
+
+
+def test_summarize_includes_shared_filter_counts(tmp_path):
+    stats = classification.summarize_classification(
+        _fastq_dir_with_filter_stats(tmp_path)
+    )
+    assert stats["lq_shared_only_backbone"] == 1
+    assert stats["lq_shared_only_host"] == 0
+    assert stats["lq_shared_only_total"] == 1
+    assert stats["shared_filter_min_unique_bases"] == 100
+    # The new keys must not leak into the substring-based totals
+    assert stats["total_hybrid"] == 1
+    assert stats["vector_lq_pure"] == 1
+    assert stats["total_reads"] == 3  # HQ 1 + pure LQ 1 + hybrid 1
+
+
+def test_summarize_without_filter_stats_has_no_shared_keys(tmp_path):
+    stats = classification.summarize_classification(
+        _fastq_dir_with_filter_stats(tmp_path, with_stats=False)
+    )
+    assert not any(k.startswith(("lq_shared_only", "shared_filter")) for k in stats)
+
+
+def test_summary_txt_reports_shared_only_reads(tmp_path):
+    stats = classification.summarize_classification(
+        _fastq_dir_with_filter_stats(tmp_path)
+    )
+    out = tmp_path / "summary.txt"
+    cli._write_summary_txt(stats, str(out))
+    assert "aligned only in vector-shared regions: 1" in out.read_text()
