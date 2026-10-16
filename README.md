@@ -27,14 +27,14 @@ Create a samplesheet (see [Samplesheet](#samplesheet)), then run the pipeline
 straight from GitHub:
 
 ```bash
-nextflow run Iclah/AAVision -r v1.0.1 -profile docker \
+nextflow run Iclah/AAVision -r v1.0.2 -profile docker \
   --input samplesheet.csv \
   --outdir results \
   --min-length 300
 ```
 
-`-r v1.0.1` pins a specific release. On the first run, Nextflow downloads the
-pipeline and pulls the container image (`ghcr.io/iclah/aavision:1.0.1`)
+`-r v1.0.2` pins a specific release. On the first run, Nextflow downloads the
+pipeline and pulls the container image (`ghcr.io/iclah/aavision:1.0.2`)
 automatically; there is no build or manual install step. The interactive report
 is written to `results/<sample>/analysis_report.html`.
 
