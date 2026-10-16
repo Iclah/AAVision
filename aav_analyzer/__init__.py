@@ -7,11 +7,11 @@ hybrid/impurity classification, truncation analysis, and generates interactive
 HTML reports.
 
 Author: Icham Lahbib
-Version: 1.0.0
+Version: 1.0.1
 License: MIT
 """
 
-__version__ = '1.0.0'
+__version__ = '1.0.1'
 __author__ = 'Icham Lahbib'
 
 # Import main modules for easy access

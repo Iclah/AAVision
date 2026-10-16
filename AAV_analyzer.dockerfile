@@ -8,7 +8,7 @@ FROM mambaorg/micromamba:2.8.1
 
 LABEL maintainer="Icham Lahbib <icham.lahbib@kuleuven.be>"
 LABEL description="AAV sequencing analysis pipeline (Nextflow workflow)"
-LABEL version="1.0.0"
+LABEL version="1.0.1"
 # Links the GHCR package to the source repository (shows under the repo's
 # Packages and enables the repo to inherit the package's access settings).
 LABEL org.opencontainers.image.source="https://github.com/Iclah/AAVision"
