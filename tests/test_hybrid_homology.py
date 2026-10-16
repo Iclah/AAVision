@@ -486,6 +486,13 @@ def test_end_to_end_hybrids_match_truth_table(tmp_path):
     assert not wrong, f"{len(wrong)} misclassified, e.g. {wrong[:5]}"
     assert set(got) == set(expected)
 
+    # Read-side check on: every true hybrid junction is still found
+    vector_iv = alignment.vector_read_intervals(sam)
+    read_side = classify(
+        "read_side", shared_regions=shared, min_unique_bases=100, vector_intervals=vector_iv
+    )
+    assert read_side == got
+
     # Regression proof: without the filter, the shared-only LQ reads are hybrids
     unfiltered = classify("unfiltered")
     pure_lq = {r for r, e in expected.items() if e == "LQ"}

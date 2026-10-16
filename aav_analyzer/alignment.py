@@ -229,6 +229,34 @@ def read_interval(read) -> tuple[int, int]:
     return start, end
 
 
+def vector_read_intervals(alignment_file: str,
+                          read_names: set[str] | None = None) -> dict[str, list[tuple[int, int]]]:
+    """
+    Per read, the parts of the ORIGINAL read covered by its vector alignment.
+
+    Primary and supplementary records are used (read_interval each) and merged
+    per read; secondary and unmapped records are skipped, as in the HQ/LQ split.
+    Used by the hybrid read-side check (docs/DECISIONS.md).
+
+    Args:
+        alignment_file: Vector SAM or BAM (format detected by pysam)
+        read_names: If given, only these reads are kept (e.g. the LQ reads)
+
+    Returns:
+        read name -> merged, sorted (start, end) intervals, 0-based half-open,
+        original read orientation. Reads without a mapped record are absent.
+    """
+    intervals = defaultdict(list)
+    with pysam.AlignmentFile(alignment_file) as fh:
+        for read in fh:
+            if read.is_unmapped or read.is_secondary:
+                continue
+            if read_names is not None and read.query_name not in read_names:
+                continue
+            intervals[read.query_name].append(read_interval(read))
+    return {name: merge_intervals(iv) for name, iv in intervals.items()}
+
+
 def is_snapback(ref_spans: list[tuple[str, int, int, bool]], min_overlap: int = 200) -> bool:
     """
     True if two records of one read lie on opposite strands and overlap on the

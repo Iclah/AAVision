@@ -5,8 +5,10 @@
 //
 // In hybrid mode, shared_beds are the sample's REF_HOMOLOGY BEDs: alignments
 // inside vector-shared regions do not count, and the rejected reads are listed
-// in hybrid_shared_only.tsv with counts in hybrid_filter_stats.json. In
-// impurity mode shared_beds is the NO_FILE placeholder and is not used.
+// in hybrid_shared_only.tsv with counts in hybrid_filter_stats.json.
+// vector_sam (hybrid mode) is the sample's vector alignment: only read bases
+// it does not cover count as hybrid evidence. In impurity mode shared_beds
+// and vector_sam are the NO_FILE placeholder and are not used.
 
 process CLASSIFY_BEST {
     tag "${meta.id}:${mode}"
@@ -19,7 +21,7 @@ process CLASSIFY_BEST {
     time   1.h
 
     input:
-    tuple val(meta), val(mode), path(bams), path(bais), path(source_fastq), path(shared_beds, stageAs: 'homology/*')
+    tuple val(meta), val(mode), path(bams), path(bais), path(source_fastq), path(shared_beds, stageAs: 'homology/*'), path(vector_sam, stageAs: 'vector/*')
     val min_unique_bases
 
     output:
@@ -29,7 +31,7 @@ process CLASSIFY_BEST {
 
     script:
     def shared = mode == 'hybrid'
-        ? "--shared-bed shared_regions.bed --min-unique-bases ${min_unique_bases}"
+        ? "--shared-bed shared_regions.bed --min-unique-bases ${min_unique_bases} --vector-sam ${vector_sam}"
         : ""
     def concat = mode == 'hybrid' ? "cat homology/*.bed > shared_regions.bed" : ""
     """

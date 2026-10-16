@@ -18,6 +18,7 @@ exit code (0 = success).
 import os
 import json
 import logging
+import pysam
 
 from . import alignment
 from . import classification
@@ -252,13 +253,18 @@ def cmd_classify_best(args):
     {out_prefix}_{refname}.fastq plus {out_prefix}_unmapped.fastq.
 
     With --shared-bed (hybrid mode only), alignments inside vector-shared
-    regions do not count (see classify_reads_from_bams).
+    regions do not count; with --vector-sam as well, only read bases the
+    vector alignment does not cover count (see classify_reads_from_bams).
     """
     shared_bed = getattr(args, 'shared_bed', None)
-    if shared_bed and args.mode != 'hybrid':
-        raise ValueError(
-            f"--shared-bed applies to the hybrid pass only, not mode '{args.mode}'"
-        )
+    vector_sam = getattr(args, 'vector_sam', None)
+    for flag, value in (('--shared-bed', shared_bed), ('--vector-sam', vector_sam)):
+        if value and args.mode != 'hybrid':
+            raise ValueError(
+                f"{flag} applies to the hybrid pass only, not mode '{args.mode}'"
+            )
+    if vector_sam and not shared_bed:
+        raise ValueError("--vector-sam needs --shared-bed")
 
     bam_files = _parse_ref_pairs(args.bams)
     if not bam_files:
@@ -268,6 +274,11 @@ def cmd_classify_best(args):
     _ensure_parent_dir(args.out_prefix + "_x")  # ensure prefix parent exists
 
     shared_regions = homology.read_shared_bed(shared_bed) if shared_bed else None
+    vector_intervals = None
+    if vector_sam:
+        with pysam.FastxFile(args.source_fastq) as fq:
+            source_names = {entry.name for entry in fq}
+        vector_intervals = alignment.vector_read_intervals(vector_sam, source_names)
     classification.classify_reads_from_bams(
         bam_files,
         args.source_fastq,
@@ -275,6 +286,7 @@ def cmd_classify_best(args):
         args.mode,
         shared_regions=shared_regions,
         min_unique_bases=getattr(args, 'min_unique_bases', 100),
+        vector_intervals=vector_intervals,
     )
     return 0
 

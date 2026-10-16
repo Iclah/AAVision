@@ -5,6 +5,54 @@ behaviour that one of these entries covers.
 
 ---
 
+## 2026-10-16 — Hybrid evidence must be read sequence the vector does not explain
+
+**Decision.** In the hybrid pass, a reference is eligible for an LQ read only
+if at least `min_unique_bases` (default 100) *distinct read positions* are
+(a) aligned to that reference outside its vector-shared regions and
+(b) not covered by any primary or supplementary vector record of the read.
+Read positions are 0-based in original read orientation (minus-strand records
+flipped). This adds (b) to the shared-region filter below and replaces its
+"aligned reference bases, summed over records" count. The vector alignment
+comes from the same vector SAM that the HQ/LQ split uses (`classify-best
+--vector-sam`; vector.bam in the standalone run, which has the same records).
+A read with hybrid alignments but no vector record is an error (wrong SAM).
+
+**Why.** On the DNase runs (vKUL115, vKULSal_new), the shared-region filter
+alone still left most host hybrids spurious:
+- Many short host records (40–100 bp, MAPQ 0–20, pericentromeric repeats)
+  on read bases the vector alignment already covers were summed past 100.
+  In vKUL115/AAV, 67% of the 8,685 host hybrids had ≥ 90% of the read
+  covered by vector records.
+- Overlapping records on the same read part were counted twice.
+- Shared elements that `asm20` misses (117 bp β-globin element in
+  CMV-EGFP-Luc; vKULSal_new's host BED was empty) were not masked at all.
+Simulated on all 8 DNase samples, host hybrids fell from 2.9k–12.6k to
+0.8k–1.4k per sample. Backbone, helper and rep_cap hybrids barely changed
+(≤ 1%), and the synthetic truth table still passes.
+
+**Alternatives considered.**
+- *Read side only, no shared-region mask* (rejected earlier). A read part
+  that the vector does not align but that is shared sequence would still be
+  a hybrid; keeping both checks covers that.
+- *MAPQ floor (≥ 20) on contributing records.* Removes more host hits
+  (1,096 → 475 in vKUL115/AAV) but also lowers backbone/helper calls where
+  MAPQ reflects repeats within those small references, and adds a second
+  threshold. Not adopted.
+- *Make `asm20` more sensitive.* Would fix only the missed-element leak, not
+  the fragment summing; may be revisited separately.
+
+**Known limitations.**
+- A real junction whose non-vector part the vector aligner also covers (for
+  example a supplementary vector record that extends across it) is missed.
+- The rule depends on vector-record clipping: ONT alignment ends can be off
+  by tens of bases, well below the 100-base threshold.
+- Recurrent host loci with MAPQ 60 (chr1:79.26 Mb, chr17:63.92 Mb, joined to
+  an ITR) remain hybrids in both DNase runs. They look like genuine host–ITR
+  molecules; their origin is not explained.
+
+---
+
 ## 2026-10-16 — HQ uses primary + supplementary read coverage; snapbacks stay LQ
 
 **Decision.** A vector read is HQ if both hold:

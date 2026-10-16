@@ -256,11 +256,20 @@ workflow {
         .map { meta, refs -> tuple([id: meta.id, mode: 'impurity'], [no_file]) }
     shared_beds = hybrid_beds.mix(impurity_beds)
 
+    // Vector alignment for the hybrid read-side check (only read bases the
+    // vector does not explain count; docs/DECISIONS.md), NO_FILE for impurity.
+    hybrid_vec = ALIGN_VECTOR.out.sam
+        .map { meta, sam -> tuple([id: meta.id, mode: 'hybrid'], sam) }
+    impurity_vec = refs_ch
+        .map { meta, refs -> tuple([id: meta.id, mode: 'impurity'], no_file) }
+    vector_sams = hybrid_vec.mix(impurity_vec)
+
     classify_best_in = grouped_bams
         .join(source_reads)
         .join(shared_beds)
-        .map { key, bams, bais, src, beds ->
-            tuple([id: key.id], key.mode, bams, bais, src, beds)
+        .join(vector_sams)
+        .map { key, bams, bais, src, beds, vec ->
+            tuple([id: key.id], key.mode, bams, bais, src, beds, vec)
         }
 
     CLASSIFY_BEST(classify_best_in, hybrid_min_unique)

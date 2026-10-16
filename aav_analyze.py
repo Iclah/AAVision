@@ -189,6 +189,10 @@ def _add_step_subparsers(subparsers):
     p.add_argument('--shared-bed', default=None,
                    help='Vector-shared regions from ref-homology (hybrid mode only)')
     p.add_argument('--min-unique-bases', type=int, default=100)
+    p.add_argument('--vector-sam', default=None,
+                   help='Vector SAM/BAM of the same sample (hybrid mode, with '
+                        '--shared-bed): only read bases the vector alignment does '
+                        'not cover count towards --min-unique-bases')
 
     # compute-coverage
     p = subparsers.add_parser('compute-coverage',
@@ -401,7 +405,10 @@ def analyze_single_sample(fastq_path: str, sample_name: str, output_dir: str,
     # Classify reads directly to fastq directory
     hybrid_files = classification.classify_reads_from_bams(
         hybrid_bams, lq_fastq, hybrid_fastq_prefix, "hybrid",
-        shared_regions=shared_regions, min_unique_bases=hybrid_min_unique
+        shared_regions=shared_regions, min_unique_bases=hybrid_min_unique,
+        # vector.bam holds the same primary + supplementary records as vector.sam
+        # (removed above); only bases the vector does not explain count
+        vector_intervals=alignment.vector_read_intervals(vector_bam),
     )
     
     log.info(f"Hybrid classification complete: {len(hybrid_files)} categories")

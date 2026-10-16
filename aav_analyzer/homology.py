@@ -19,6 +19,7 @@ so a reference with no shared region is distinguishable from one that was
 never searched.
 """
 
+import bisect
 import logging
 import os
 import subprocess
@@ -253,3 +254,53 @@ def unique_aligned_bases(segment, shared: ContigIntervals) -> int:
             overlap += max(0, min(b_end, e) - max(b_start, s))
         unique += (b_end - b_start) - overlap
     return unique
+
+
+def _in_intervals(pos: int, starts: list[int], intervals: list[Interval]) -> bool:
+    """True if pos lies in one of the sorted, non-overlapping half-open intervals."""
+    i = bisect.bisect_right(starts, pos) - 1
+    return i >= 0 and pos < intervals[i][1]
+
+
+def novel_read_positions(segment, shared: ContigIntervals,
+                         vector_read_intervals: list[Interval]) -> set[int]:
+    """
+    Read positions that one record aligns outside the shared regions and that
+    no vector record of the same read covers.
+
+    A hybrid needs read sequence the vector does not explain (docs/DECISIONS.md,
+    read-side check). Hits on read bases the vector alignment already covers
+    (short repeat hits, shared elements the homology search missed) are not
+    evidence of a junction.
+
+    Aligned positions are M/=/X pairs (pysam get_aligned_pairs matches_only);
+    insertions, deletions and clips do not count, as in unique_aligned_bases.
+
+    Args:
+        segment: Mapped pysam AlignedSegment (primary or supplementary)
+        shared: contig -> merged 0-based half-open reference intervals for this
+            reference
+        vector_read_intervals: the read's primary + supplementary vector records,
+            merged, sorted, 0-based half-open, ORIGINAL read orientation
+            (alignment.vector_read_intervals)
+
+    Returns:
+        Set of 0-based read positions in original read orientation. Minus-strand
+        records are flipped with the full read length including hard clips.
+    """
+    ref_iv = shared.get(segment.reference_name, [])
+    ref_starts = [s for s, _ in ref_iv]
+    vec_starts = [s for s, _ in vector_read_intervals]
+    full = segment.infer_read_length()
+    first_op, first_len = segment.cigartuples[0]
+    lead_hard = first_len if first_op == 5 else 0  # 5 = H; SEQ starts after it
+    novel = set()
+    for qpos, rpos in segment.get_aligned_pairs(matches_only=True):
+        if _in_intervals(rpos, ref_starts, ref_iv):
+            continue
+        q = qpos + lead_hard
+        if segment.is_reverse:
+            q = full - 1 - q
+        if not _in_intervals(q, vec_starts, vector_read_intervals):
+            novel.add(q)
+    return novel
