@@ -95,7 +95,7 @@ samplesheet fails to parse.
 | `--outdir` | `results` | Directory for published outputs |
 | `--quality` | `90` | Minimum read coverage (%) by the vector alignments (primary + supplementary) for high-quality vector reads |
 | `--snapback-overlap` | `200` | Reads with two vector alignments on opposite strands overlapping by at least this many bp are snapbacks and count as low-quality |
-| `--hybrid-min-unique` | `100` | A low-quality read counts as a hybrid with a reference only if it aligns at least this many bases outside the regions that reference shares with the vector |
+| `--hybrid-min-unique` | `100` | A low-quality read counts as a hybrid with a reference only if at least this many read bases align to it outside the regions it shares with the vector and outside the read's vector alignment |
 | `--homology-preset` | `asm20` | minimap2 preset used to find the regions each reference shares with the vector |
 | `--min-length` | `0` | Minimum read length filter in bp (`0` = off) |
 | `--kraken_db` | `null` | Path to a Kraken2 database directory. If unset, taxonomy is skipped |
@@ -163,8 +163,8 @@ with Plotly, so viewing the report requires an internet connection. An example r
 3. **Hybrid detection** — low-quality vector reads are aligned to the other
    references and assigned to the best-matching one. Regions a reference shares
    with the vector (found by aligning the vector to it) are ignored, so a read
-   only counts as a hybrid if it aligns at least `--hybrid-min-unique` bases of
-   genuinely non-vector sequence.
+   only counts as a hybrid if at least `--hybrid-min-unique` read bases align
+   to it outside those regions and outside the read's vector alignment.
 4. **Impurity detection** — unmapped reads are aligned to all references and
    classified by best alignment.
 5. **Truncation analysis** — read termini are counted, normalized by coverage,

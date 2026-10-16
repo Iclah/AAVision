@@ -10,7 +10,7 @@ import pysam
 from typing import Dict, List
 from collections import defaultdict
 
-from .homology import SharedRegions, unique_aligned_bases
+from .homology import SharedRegions, novel_read_positions, unique_aligned_bases
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 def classify_reads_from_bams(bam_files: Dict[str, str], source_fastq: str,
                              output_prefix: str, read_type: str = "hybrid",
                              shared_regions: SharedRegions | None = None,
-                             min_unique_bases: int = 100) -> Dict[str, str]:
+                             min_unique_bases: int = 100,
+                             vector_intervals: dict[str, list[tuple[int, int]]] | None = None
+                             ) -> Dict[str, str]:
     """
     Classify reads based on best alignment score across multiple BAM files.
 
@@ -29,7 +31,13 @@ def classify_reads_from_bams(bam_files: Dict[str, str], source_fastq: str,
     regions, summed over its primary and supplementary records
     (homology.unique_aligned_bases; 0-based half-open intervals, strand
     ignored). The best eligible reference by AS wins; reads with no eligible
-    reference go to unmapped (pure LQ in the hybrid pass). Rejected
+    reference go to unmapped (pure LQ in the hybrid pass).
+
+    With vector_intervals as well (read-side check, docs/DECISIONS.md), the
+    count is instead the number of DISTINCT read positions that a reference's
+    records align outside its shared regions AND that no vector record of the
+    read covers (homology.novel_read_positions). Hits on read bases the vector
+    already explains, and overlapping records, then add nothing. Rejected
     (read, reference) pairs are written to {output_prefix}_shared_only.tsv and
     counts to {output_prefix}_filter_stats.json.
 
@@ -41,15 +49,25 @@ def classify_reads_from_bams(bam_files: Dict[str, str], source_fastq: str,
         shared_regions: Vector-shared regions per reference, or None to disable
             the filter. Must have searched every reference in bam_files.
         min_unique_bases: Minimum aligned reference bases outside shared
-            regions for a reference to be eligible (inclusive)
+            regions for a reference to be eligible (inclusive); with
+            vector_intervals, minimum novel read bases instead
+        vector_intervals: read name -> merged vector-covered read intervals
+            (alignment.vector_read_intervals; 0-based half-open, original read
+            orientation), or None to skip the read-side check. Requires
+            shared_regions.
 
     Returns:
         Dict mapping categories to output FASTQ file paths
 
     Raises:
-        ValueError: if shared_regions was not searched for a reference in bam_files
+        ValueError: if shared_regions was not searched for a reference in bam_files;
+            if vector_intervals is given without shared_regions; if a read with
+            alignments has no entry in vector_intervals (wrong vector SAM)
     """
     logging.info(f"Classifying {read_type} reads")
+
+    if vector_intervals is not None and shared_regions is None:
+        raise ValueError("The read-side check (vector_intervals) needs shared_regions")
 
     if shared_regions is not None:
         unsearched = sorted(set(bam_files) - shared_regions.searched)
@@ -78,8 +96,10 @@ def classify_reads_from_bams(bam_files: Dict[str, str], source_fastq: str,
 
     ordered_items = sorted(bam_files.items(), key=lambda kv: _rank(kv[0]))
 
-    # read name -> ref name -> [best AS, aligned bases outside shared regions]
+    # read name -> ref name -> [best AS, aligned bases outside shared regions,
+    #                           novel read positions (set) or None without the read-side check]
     hits = {}
+    no_vector = set()  # reads with alignments but no vector record
     for ref_name, bam_file in ordered_items:
         logging.debug(f"Parsing alignments from {ref_name}")
         shared = shared_regions.intervals.get(ref_name, {}) if shared_regions else None
@@ -91,29 +111,47 @@ def classify_reads_from_bams(bam_files: Dict[str, str], source_fastq: str,
                     score = read.get_tag("AS")  # Alignment score
                 except KeyError:
                     score = 0
-                hit = hits.setdefault(read.query_name, {}).setdefault(ref_name, [score, 0])
+                hit = hits.setdefault(read.query_name, {}).setdefault(
+                    ref_name, [score, 0, set() if vector_intervals is not None else None])
                 hit[0] = max(hit[0], score)
                 if shared is not None:
                     hit[1] += unique_aligned_bases(read, shared)
+                if vector_intervals is not None:
+                    vec_iv = vector_intervals.get(read.query_name)
+                    if vec_iv is None:
+                        no_vector.add(read.query_name)
+                        continue
+                    # Union of positions: overlapping records count once
+                    hit[2] |= novel_read_positions(read, shared, vec_iv)
+
+    if no_vector:
+        example = ", ".join(sorted(no_vector)[:3])
+        raise ValueError(
+            f"{len(no_vector)} read(s) with {read_type} alignments have no vector "
+            f"record (e.g. {example}); is the vector SAM from the same sample?"
+        )
 
     # Best eligible reference per read. Strict < means the FIRST reference
     # (in canonical order) wins on a tie.
     read_scores = {}
-    rejected = []  # (read, ref, best AS, unique bases)
+    rejected = []  # (read, ref, best AS, unique bases, novel read bases or None)
     for read_name, refs in hits.items():
         for ref_name, _ in ordered_items:
             if ref_name not in refs:
                 continue
-            score, unique = refs[ref_name]
-            if shared_regions is not None and unique < min_unique_bases:
-                rejected.append((read_name, ref_name, score, unique))
+            score, unique, novel = refs[ref_name]
+            n_novel = len(novel) if novel is not None else None
+            evidence = n_novel if n_novel is not None else unique
+            if shared_regions is not None and evidence < min_unique_bases:
+                rejected.append((read_name, ref_name, score, unique, n_novel))
                 continue
             if read_name not in read_scores or read_scores[read_name][1] < score:
                 read_scores[read_name] = (ref_name, score)
 
     if shared_regions is not None:
         _write_shared_filter_report(
-            rejected, read_scores, list(bam_files), min_unique_bases, output_prefix
+            rejected, read_scores, list(bam_files), min_unique_bases, output_prefix,
+            read_side_check=vector_intervals is not None,
         )
 
     # Initialize read collections
@@ -157,7 +195,8 @@ def classify_reads_from_bams(bam_files: Dict[str, str], source_fastq: str,
 
 
 def _write_shared_filter_report(rejected: list, read_scores: dict, ref_names: list[str],
-                                min_unique_bases: int, output_prefix: str) -> None:
+                                min_unique_bases: int, output_prefix: str,
+                                read_side_check: bool = False) -> None:
     """
     Write {output_prefix}_shared_only.tsv (one row per rejected read/reference
     pair) and {output_prefix}_filter_stats.json, and log the counts.
@@ -165,17 +204,22 @@ def _write_shared_filter_report(rejected: list, read_scores: dict, ref_names: li
     A read is "rescued to LQ" when it had alignments but every one was
     rejected; it is attributed to the reference of its best rejected AS
     (canonical order on ties, as rejected is built in that order).
+
+    unique_bases is the reference-side count (aligned bases outside shared
+    regions, summed over records); novel_read_bases is the read-side count used
+    for the decision when read_side_check is on, and empty otherwise.
     """
     tsv_path = f"{output_prefix}_shared_only.tsv"
     with open(tsv_path, 'w') as fh:
-        fh.write("read_id\tref_name\tbest_AS\tunique_bases\tfinal_category\n")
-        for read_name, ref_name, score, unique in rejected:
+        fh.write("read_id\tref_name\tbest_AS\tunique_bases\tnovel_read_bases\tfinal_category\n")
+        for read_name, ref_name, score, unique, novel in rejected:
             final = read_scores[read_name][0] if read_name in read_scores else 'unmapped'
-            fh.write(f"{read_name}\t{ref_name}\t{score}\t{unique}\t{final}\n")
+            novel = '' if novel is None else novel
+            fh.write(f"{read_name}\t{ref_name}\t{score}\t{unique}\t{novel}\t{final}\n")
 
     rejected_by_ref = {ref: 0 for ref in ref_names}
     best_rejected = {}  # read -> (ref, AS) for reads with no eligible reference
-    for read_name, ref_name, score, _ in rejected:
+    for read_name, ref_name, score, _, _ in rejected:
         rejected_by_ref[ref_name] += 1
         if read_name in read_scores:
             continue
@@ -187,6 +231,7 @@ def _write_shared_filter_report(rejected: list, read_scores: dict, ref_names: li
 
     stats = {
         'min_unique_bases': min_unique_bases,
+        'read_side_check': read_side_check,
         'rejected_alignments_by_ref': rejected_by_ref,
         'rescued_to_lq_by_ref': rescued_by_ref,
         'rescued_to_lq': len(best_rejected),
