@@ -147,8 +147,8 @@ def classify_vector_reads(vector_sam: str, vector_fastq: str,
     hq_fastq = os.path.join(output_dir, 'vector_HQ.fastq')
     lq_fastq = os.path.join(output_dir, 'vector_LQ.fastq')
     
-    # Extract high-quality reads (≥90% coverage)
-    hq_count = filter_reads_by_coverage(vector_sam, hq_fastq, min_coverage)
+    # HQ: primary alignment covers >= min_coverage of the read
+    hq_count = filter_reads_by_coverage(vector_sam, vector_fastq, hq_fastq, min_coverage)
     
     # Create low-quality reads (vector_mapped - HQ)
     lq_count = create_fastq_difference(vector_fastq, hq_fastq, lq_fastq)

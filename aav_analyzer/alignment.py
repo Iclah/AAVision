@@ -2,15 +2,24 @@
 Alignment and read filtering functions for AAV analysis.
 Handles minimap2 alignment and quality-based filtering.
 
-SAM/BAM Flag Strategy:
-- Primary alignments (flag 0): Main alignment for each read â†’ ANALYZE
-- Secondary alignments (flag 256): Same read mapping elsewhere â†’ EXCLUDE from all files
-- Supplementary alignments (flag 2048): Chimeric/split alignments â†’ KEEP in BAM for visualization, EXCLUDE from analysis
+minimap2 runs with -Y, so supplementary records are soft-clipped and carry
+the full read sequence.
 
-Flags used:
-- -F 260: Exclude unmapped(4) + secondary(256) â†’ Keep primary + supplementary
-- -F 2308: Exclude unmapped(4) + secondary(256) + supplementary(2048) â†’ Keep primary only
-- -F 256: Exclude secondary(256) only â†’ Keep primary + supplementary + unmapped
+Which records each step uses:
+- vector.fastq (samtools fastq -F 2308): primary alignments only, written in
+  the read's original orientation.
+- HQ/LQ split (filter_reads_by_coverage): primary alignments only.
+- vector.bam (-F 260): primary + supplementary, no secondary. Used for IGV,
+  for the samtools-depth coverage plot (which counts supplementary records),
+  and for truncation hotspots (which skip supplementary records).
+- Hybrid/impurity BAMs (sam_to_sorted_bam, -F 256): primary + supplementary
+  + unmapped. Best-reference assignment takes the highest AS over a read's
+  primary and supplementary records.
+
+samtools flags used:
+- -F 260:  exclude unmapped (4) + secondary (256)
+- -F 2308: exclude unmapped (4) + secondary (256) + supplementary (2048)
+- -F 256:  exclude secondary (256) only
 """
 
 import os
@@ -35,15 +44,20 @@ def align_reads(fastq_file: str, reference_fasta: str, output_sam: str,
     Returns:
         Path to output SAM file
     """
+    # -Y: soft-clip supplementary alignments (minimap2 hard-clips them by
+    # default). Supplementary records then carry the full read SEQ and length,
+    # so IGV shows full read context and CIGAR-based read lengths are correct
+    # for every record. HQ/LQ does not depend on this: it uses primaries only.
     cmd = [
         'minimap2',
         '-ax', 'map-ont',
+        '-Y',
         '-t', str(threads),
         reference_fasta,
         fastq_file
     ]
     
-    logging.info(f"Aligning reads to {os.path.basename(reference_fasta)}")
+    logging.info(f"Aligning reads to {os.path.basename(reference_fasta)}: {' '.join(cmd)}")
     
     with open(output_sam, 'w') as outfile:
         subprocess.run(cmd, stdout=outfile, check=True, stderr=subprocess.PIPE)
@@ -176,109 +190,110 @@ def extract_mapped_reads(sam_file: str, output_fastq: str) -> int:
 
 def calculate_alignment_coverage(read) -> float:
     """
-    Calculate alignment coverage from a pysam AlignedSegment.
-    
-    Coverage = (aligned_length_on_read / total_read_length)
-    
-    Aligned length = read length - soft clipped bases
-    
+    Fraction of the full read that one alignment record covers.
+
+    Coverage = read bases in M/I/=/X operations / full read length, where the
+    full read length is taken from the CIGAR including hard clips
+    (pysam infer_read_length). Including hard clips matters: minimap2 without
+    -Y hard-clips supplementary records, so query_length alone would make
+    every supplementary record look like it covers 100% of the read.
+
+    Deletions (D/N) consume reference only and do not lower coverage: a read
+    with a large internal deletion bridged by one alignment scores 1.0. This
+    is intended (docs/DECISIONS.md). No positions are involved.
+
     Args:
-        read: pysam AlignedSegment object
-        
+        read: pysam AlignedSegment (mapped, with a CIGAR)
+
     Returns:
-        Coverage as a float (0.0 to 1.0)
+        Coverage in [0.0, 1.0]; 0.0 if the read has no CIGAR
     """
-    if read.query_length is None or read.query_length == 0:
+    read_length = read.infer_read_length()
+    if not read_length or not read.cigartuples:
         return 0.0
-    
-    # Get total read length
-    read_length = read.query_length
-    
-    # Count all soft-clipped bases from CIGAR
-    soft_clipped = 0
-    if read.cigartuples:
-        for op, length in read.cigartuples:
-            if op == 4:  # 4 = soft clip (S in CIGAR)
-                soft_clipped += length
-    
-    # Calculate aligned length
-    aligned_length = read_length - soft_clipped
-    
-    # Calculate coverage
-    coverage = aligned_length / read_length
-    
-    return min(coverage, 1.0)  # Cap at 1.0
+
+    # 0=M, 1=I, 7='=', 8=X consume query bases that are aligned
+    aligned_length = sum(length for op, length in read.cigartuples if op in (0, 1, 7, 8))
+    return aligned_length / read_length
 
 
-def filter_reads_by_coverage(sam_file: str, output_fastq: str, 
-                            min_coverage: float = 0.9) -> int:
+def filter_reads_by_coverage(sam_file: str, vector_fastq: str, output_fastq: str,
+                             min_coverage: float = 0.9) -> int:
     """
-    Extract high-quality reads based on alignment coverage threshold.
-    Mimics sam2fastq behavior: processes primary + supplementary,
-    but outputs only FIRST occurrence of each read name.
-    
-    Coverage = aligned_length / read_length
-    Aligned length = read_length - all_soft_clipped_bases
-    
+    Write high-quality (HQ) vector reads: reads whose PRIMARY alignment
+    covers >= min_coverage of the full read.
+
+    The HQ decision uses the primary record only, once per read. Secondary
+    and supplementary records are ignored, so a split (chimeric) read is
+    judged on its primary alignment whatever order records appear in.
+
+    HQ reads are copied from vector_fastq (as written by extract_mapped_reads),
+    not rebuilt from SAM records, so they keep their original orientation,
+    full length and qualities. Minus-strand SAM records store the reverse
+    complement, and hard-clipped records store only part of the read.
+
     Args:
-        sam_file: Input SAM file
-        output_fastq: Output FASTQ file path
-        min_coverage: Minimum alignment coverage (0.0 to 1.0)
-        
+        sam_file: Vector alignment SAM/BAM (any record order)
+        vector_fastq: FASTQ of all primary-mapped vector reads, original orientation
+        output_fastq: Output FASTQ for HQ reads
+        min_coverage: Minimum primary-alignment coverage, inclusive (0.0 to 1.0)
+
     Returns:
-        Number of reads passing filter
+        Number of HQ reads written
+
+    Raises:
+        ValueError: if an HQ read from the SAM is missing from vector_fastq
+            (inputs out of sync)
     """
-    logging.info(f"Filtering reads with >={min_coverage*100:.0f}% coverage")
-    
-    samfile = pysam.AlignmentFile(sam_file, "r")
-    read_count = 0
-    seen_reads = {}  # Track which reads we've already written
-    
-    with open(output_fastq, 'w') as outfile:
+    logging.info(f"Filtering reads with >={min_coverage*100:.0f}% primary-alignment coverage")
+
+    hq_names = set()
+    n_primary = 0
+    n_lq_with_supp = 0  # LQ reads with an SA tag: promoted to HQ before this fix
+    n_skipped = {'unmapped': 0, 'secondary': 0, 'supplementary': 0}
+
+    with pysam.AlignmentFile(sam_file, "r") as samfile:
         for read in samfile:
-            # Skip unmapped reads
             if read.is_unmapped:
+                n_skipped['unmapped'] += 1
                 continue
-            
-            # Skip secondary alignments (mimics sam2fastq checking tp:A:S)
             if read.is_secondary:
+                n_skipped['secondary'] += 1
                 continue
-            
-            # Supplementary alignments have tp:A:P, so they pass through
-            # (just like in sam2fastq)
-            
-            # Check if we've already written this read name
-            if read.query_name in seen_reads:
-                continue  # Skip - already written (sam2fastq behavior)
-            
-            # Skip reads without sequence or quality
-            if read.query_sequence is None or read.query_qualities is None:
+            if read.is_supplementary:
+                n_skipped['supplementary'] += 1
                 continue
-            
-            # Calculate coverage
-            try:
-                coverage = calculate_alignment_coverage(read)
-            except Exception as e:
-                logging.debug(f"Could not calculate coverage for {read.query_name}: {e}")
-                continue
-            
-            # Write if passes threshold
-            if coverage >= min_coverage:
-                try:
-                    quality_string = ''.join(chr(q + 33) for q in read.query_qualities)
-                    outfile.write(f"@{read.query_name}\n")
-                    outfile.write(f"{read.query_sequence}\n")
-                    outfile.write("+\n")
-                    outfile.write(f"{quality_string}\n")
-                    seen_reads[read.query_name] = True  # Mark as written
-                    read_count += 1
-                except Exception as e:
-                    logging.debug(f"Could not write read {read.query_name}: {e}")
-                    continue
-    
-    samfile.close()
-    
-    logging.info(f"Extracted {read_count} high-coverage reads (unique reads, first occurrence)")
+
+            n_primary += 1
+            if calculate_alignment_coverage(read) >= min_coverage:
+                hq_names.add(read.query_name)
+            elif read.has_tag('SA'):
+                n_lq_with_supp += 1
+
+    read_count = 0
+    with open(output_fastq, 'w') as outfile:
+        if os.path.exists(vector_fastq) and os.path.getsize(vector_fastq) > 0:
+            with pysam.FastxFile(vector_fastq) as fq:
+                for entry in fq:
+                    if entry.name in hq_names:
+                        outfile.write(f"@{entry.name}\n{entry.sequence}\n+\n{entry.quality}\n")
+                        read_count += 1
+
+    if read_count != len(hq_names):
+        raise ValueError(
+            f"{len(hq_names) - read_count} HQ reads from {sam_file} are missing "
+            f"from {vector_fastq}; were both produced from the same alignment?"
+        )
+
+    logging.info(
+        f"Evaluated {n_primary} primary alignments: {read_count} HQ, "
+        f"{n_primary - read_count} below threshold "
+        f"({n_lq_with_supp} of these have supplementary alignments)"
+    )
+    logging.info(
+        "Records not used for the HQ decision: "
+        + ", ".join(f"{k}={v}" for k, v in n_skipped.items())
+    )
     return read_count
 
 

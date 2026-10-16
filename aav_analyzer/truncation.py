@@ -17,6 +17,9 @@ def compute_truncation_hotspots(bam_file: str, smoothing_window: int = 10,
     
     Counts read termini (start + end positions), normalizes by coverage,
     applies rolling smoothing, and converts to percentage enrichment scores.
+    Only primary alignments are used; secondary and supplementary records
+    are skipped (counted in the log). Internal positions are 0-based; the
+    output 'pos' column is 1-based.
     
     Args:
         bam_file: Path to sorted BAM file
@@ -30,15 +33,21 @@ def compute_truncation_hotspots(bam_file: str, smoothing_window: int = 10,
     
     bam = pysam.AlignmentFile(bam_file, "rb")
     frames = []
+    n_skipped = 0  # secondary + supplementary records, not used
     
     for chrom, chrom_len in zip(bam.references, bam.lengths):
         # Initialize arrays for this chromosome
         termini_counts = [0] * chrom_len
         coverage = [0] * chrom_len
         
-        # Count termini and coverage
+        # Count termini and coverage from primary records only. Supplementary
+        # records start/end at chimera breakpoints, not at genome ends, and a
+        # split read would otherwise add coverage and termini more than once.
         for read in bam.fetch(chrom):
             if read.is_unmapped:
+                continue
+            if read.is_secondary or read.is_supplementary:
+                n_skipped += 1
                 continue
                 
             start = read.reference_start
@@ -84,6 +93,7 @@ def compute_truncation_hotspots(bam_file: str, smoothing_window: int = 10,
         frames.append(df)
     
     bam.close()
+    logging.info(f"Truncation analysis: skipped {n_skipped} secondary/supplementary records")
     
     result = pd.concat(frames, ignore_index=True)
     logging.info(f"Truncation analysis complete: {len(result)} positions analyzed")
@@ -114,7 +124,10 @@ def get_truncation_data_dict(df: pd.DataFrame) -> Dict[int, float]:
 def compute_coverage(bam_file: str, max_pos: int = 6000) -> Dict[int, int]:
     """
     Calculate per-position coverage from BAM file using samtools depth.
-    This matches IGV's coverage calculation method.
+    This matches IGV's coverage calculation method: supplementary records
+    ARE counted (samtools depth default), so both parts of a split read add
+    depth. Secondary records are excluded by samtools depth by default.
+    Unlike compute_truncation_hotspots, which uses primary records only.
 
     Args:
         bam_file: Path to sorted BAM file with AAV reads
