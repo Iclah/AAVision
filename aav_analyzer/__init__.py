@@ -21,6 +21,7 @@ from . import classification
 from . import truncation
 from . import report
 from . import taxonomy
+from . import homology
 from . import cli
 
 __all__ = [
@@ -30,5 +31,6 @@ __all__ = [
     'truncation',
     'report',
     'taxonomy',
+    'homology',
     'cli'
 ]
