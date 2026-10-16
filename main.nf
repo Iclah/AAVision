@@ -220,7 +220,7 @@ workflow {
     // --- Vector-shared regions of each hybrid reference ---
     // One task per [sample, hybrid ref] (the same refs as the hybrid pass);
     // LQ reads aligning to a reference only inside these regions are pure
-    // vector, not hybrids (docs/DECISIONS.md).
+    // vector, not hybrids.
     ref_homology_in = refs_ch
         .flatMap { meta, refs -> expand_refs(meta, refs.vector, refs, 'hybrid') }
         .map { meta, vector, ref_name, ref, mode -> tuple(meta, vector, ref_name, ref) }
@@ -257,7 +257,7 @@ workflow {
     shared_beds = hybrid_beds.mix(impurity_beds)
 
     // Vector alignment for the hybrid read-side check (only read bases the
-    // vector does not explain count; docs/DECISIONS.md), NO_FILE for impurity.
+    // vector does not explain count), NO_FILE for impurity.
     hybrid_vec = ALIGN_VECTOR.out.sam
         .map { meta, sam -> tuple([id: meta.id, mode: 'hybrid'], sam) }
     impurity_vec = refs_ch

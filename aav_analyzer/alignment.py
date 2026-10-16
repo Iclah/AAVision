@@ -10,7 +10,7 @@ Which records each step uses:
   the read's original orientation.
 - HQ/LQ split (filter_reads_by_coverage): primary + supplementary, merged in
   read coordinates; opposite-strand records overlapping on the vector mark a
-  snapback, which is LQ (docs/DECISIONS.md).
+  snapback, which is LQ.
 - vector.bam (-F 260): primary + supplementary, no secondary. Used for IGV,
   for the samtools-depth coverage plot (which counts supplementary records),
   and for truncation hotspots (which skip supplementary records).
@@ -206,7 +206,7 @@ def read_interval(read) -> tuple[int, int]:
 
     Deletions (D/N) consume reference only and do not shrink the interval: a
     read with a large internal deletion bridged by one alignment covers the
-    whole read (docs/DECISIONS.md).
+    whole read.
 
     Args:
         read: Mapped pysam AlignedSegment with a CIGAR
@@ -236,7 +236,7 @@ def vector_read_intervals(alignment_file: str,
 
     Primary and supplementary records are used (read_interval each) and merged
     per read; secondary and unmapped records are skipped, as in the HQ/LQ split.
-    Used by the hybrid read-side check (docs/DECISIONS.md).
+    Used by the hybrid read-side check.
 
     Args:
         alignment_file: Vector SAM or BAM (format detected by pysam)

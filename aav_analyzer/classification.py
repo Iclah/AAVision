@@ -25,7 +25,7 @@ def classify_reads_from_bams(bam_files: Dict[str, str], source_fastq: str,
     Classify reads based on best alignment score across multiple BAM files.
 
     Without shared_regions every mapped record is eligible (v1.0.1 behaviour).
-    With shared_regions (hybrid pass, docs/DECISIONS.md), a reference is
+    With shared_regions (hybrid pass), a reference is
     eligible for a read only if the read's records on it align at least
     min_unique_bases reference bases outside that reference's vector-shared
     regions, summed over its primary and supplementary records
@@ -33,7 +33,7 @@ def classify_reads_from_bams(bam_files: Dict[str, str], source_fastq: str,
     ignored). The best eligible reference by AS wins; reads with no eligible
     reference go to unmapped (pure LQ in the hybrid pass).
 
-    With vector_intervals as well (read-side check, docs/DECISIONS.md), the
+    With vector_intervals as well (read-side check), the
     count is instead the number of DISTINCT read positions that a reference's
     records align outside its shared regions AND that no vector record of the
     read covers (homology.novel_read_positions). Hits on read bases the vector

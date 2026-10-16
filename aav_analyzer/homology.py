@@ -2,7 +2,7 @@
 Regions of the non-vector references that share sequence with the vector.
 
 LQ vector reads that align to another reference only inside these regions are
-pure vector, not hybrids (docs/DECISIONS.md, 2026-10-16). The regions are
+pure vector, not hybrids. The regions are
 found by aligning vector.fasta to each reference with minimap2 and kept as
 reference intervals.
 
@@ -268,8 +268,8 @@ def novel_read_positions(segment, shared: ContigIntervals,
     Read positions that one record aligns outside the shared regions and that
     no vector record of the same read covers.
 
-    A hybrid needs read sequence the vector does not explain (docs/DECISIONS.md,
-    read-side check). Hits on read bases the vector alignment already covers
+    A hybrid needs read sequence the vector does not explain (read-side
+    check). Hits on read bases the vector alignment already covers
     (short repeat hits, shared elements the homology search missed) are not
     evidence of a junction.
 
