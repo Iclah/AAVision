@@ -95,6 +95,8 @@ samplesheet fails to parse.
 | `--outdir` | `results` | Directory for published outputs |
 | `--quality` | `90` | Minimum read coverage (%) by the vector alignments (primary + supplementary) for high-quality vector reads |
 | `--snapback-overlap` | `200` | Reads with two vector alignments on opposite strands overlapping by at least this many bp are snapbacks and count as low-quality |
+| `--hybrid-min-unique` | `100` | A low-quality read counts as a hybrid with a reference only if it aligns at least this many bases outside the regions that reference shares with the vector |
+| `--homology-preset` | `asm20` | minimap2 preset used to find the regions each reference shares with the vector |
 | `--min-length` | `0` | Minimum read length filter in bp (`0` = off) |
 | `--kraken_db` | `null` | Path to a Kraken2 database directory. If unset, taxonomy is skipped |
 | `--kraken_confidence` | `0.05` | Kraken2 confidence threshold |
@@ -132,8 +134,11 @@ results/<sample>/
 │   ├── vector_HQ.fastq           # high-quality vector reads
 │   ├── vector_LQ.fastq           # low-quality vector reads
 │   ├── hybrid_*.fastq            # hybrid reads by reference
+│   ├── hybrid_shared_only.tsv    # LQ reads not called hybrid: aligned only in vector-shared regions
+│   ├── hybrid_filter_stats.json  # counts for the shared-region filter
 │   └── impurity_*.fastq          # impurity reads by reference
 ├── bam/                          # alignments (IGV-compatible)
+├── homology/                     # regions of each reference shared with the vector (BED, 0-based)
 └── stats/                        # JSON/CSV statistics, coverage, truncation,
                                   # read lengths, and taxonomy (if enabled)
 ```
@@ -156,7 +161,10 @@ with Plotly, so viewing the report requires an internet connection. An example r
    and supplementary combined (default ≥90%). Snapbacks (a vector region
    followed by its own reverse complement) are low-quality.
 3. **Hybrid detection** — low-quality vector reads are aligned to the other
-   references and assigned to the best-matching one.
+   references and assigned to the best-matching one. Regions a reference shares
+   with the vector (found by aligning the vector to it) are ignored, so a read
+   only counts as a hybrid if it aligns at least `--hybrid-min-unique` bases of
+   genuinely non-vector sequence.
 4. **Impurity detection** — unmapped reads are aligned to all references and
    classified by best alignment.
 5. **Truncation analysis** — read termini are counted, normalized by coverage,

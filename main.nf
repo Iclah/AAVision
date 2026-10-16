@@ -26,6 +26,7 @@ include { ALIGN_VECTOR }   from './modules/local/align_vector.nf'
 include { EXTRACT_VECTOR } from './modules/local/extract_vector.nf'
 include { CLASSIFY_HQ_LQ } from './modules/local/classify_hq_lq.nf'
 include { ALIGN_REF }      from './modules/local/align_ref.nf'
+include { REF_HOMOLOGY }   from './modules/local/ref_homology.nf'
 include { CLASSIFY_BEST }  from './modules/local/classify_best.nf'
 include { COMPUTE_TRUNCATION } from './modules/local/compute_truncation.nf'
 include { COMPUTE_COVERAGE }   from './modules/local/compute_coverage.nf'
@@ -147,6 +148,14 @@ workflow {
     // reconciliation as min_length (--snapback-overlap -> snapbackOverlap).
     def snapback_overlap = params.containsKey('snapbackOverlap') ? params.snapbackOverlap : params.snapback_overlap
 
+    // Hybrid shared-region filter; same reconciliation for the CLI spellings
+    // --hybrid-min-unique and --homology-preset.
+    def hybrid_min_unique = params.containsKey('hybridMinUnique') ? params.hybridMinUnique : params.hybrid_min_unique
+    def homology_preset = params.containsKey('homologyPreset') ? params.homologyPreset : params.homology_preset
+
+    // Placeholder for optional path inputs (see taxonomy below)
+    no_file = file("${projectDir}/assets/NO_FILE")
+
     samples_ch = channel
         .fromPath(params.input, checkIfExists: true)
         .splitCsv(header: true)
@@ -208,6 +217,16 @@ workflow {
 
     ALIGN_REF(align_ref_in)
 
+    // --- Vector-shared regions of each hybrid reference ---
+    // One task per [sample, hybrid ref] (the same refs as the hybrid pass);
+    // LQ reads aligning to a reference only inside these regions are pure
+    // vector, not hybrids (docs/DECISIONS.md).
+    ref_homology_in = refs_ch
+        .flatMap { meta, refs -> expand_refs(meta, refs.vector, refs, 'hybrid') }
+        .map { meta, vector, ref_name, ref, mode -> tuple(meta, vector, ref_name, ref) }
+
+    REF_HOMOLOGY(ref_homology_in, homology_preset)
+
     // --- Steps 6+8: combined gather + best-alignment classification ---
     // Group BAMs per [id, mode] (mode keeps hybrid and impurity separate),
     // then join each group with its source reads. The source differs by mode:
@@ -228,13 +247,23 @@ workflow {
         .map { meta, unmapped -> tuple([id: meta.id, mode: 'impurity'], unmapped) }
     source_reads = hybrid_src.mix(impurity_src)
 
+    // Shared-region BEDs keyed the same way: the sample's REF_HOMOLOGY BEDs
+    // for the hybrid pass, the NO_FILE placeholder for the impurity pass.
+    hybrid_beds = REF_HOMOLOGY.out.bed
+        .map { meta, ref_name, bed -> tuple([id: meta.id, mode: 'hybrid'], bed) }
+        .groupTuple()
+    impurity_beds = refs_ch
+        .map { meta, refs -> tuple([id: meta.id, mode: 'impurity'], [no_file]) }
+    shared_beds = hybrid_beds.mix(impurity_beds)
+
     classify_best_in = grouped_bams
         .join(source_reads)
-        .map { key, bams, bais, src ->
-            tuple([id: key.id], key.mode, bams, bais, src)
+        .join(shared_beds)
+        .map { key, bams, bais, src, beds ->
+            tuple([id: key.id], key.mode, bams, bais, src, beds)
         }
 
-    CLASSIFY_BEST(classify_best_in)
+    CLASSIFY_BEST(classify_best_in, hybrid_min_unique)
 
     CLASSIFY_BEST.out.classified.view { meta, mode, fastqs ->
         "CLASSIFY_BEST [${meta.id}:${mode}] -> ${fastqs}"
@@ -306,8 +335,6 @@ workflow {
     // right channel makes join emit only the key, collapsing the tuple. Instead
     // we build a placeholder channel keyed by meta and (when taxonomy ran)
     // override it with the real summary via mix + groupTuple-free join.
-    no_file = file("${projectDir}/assets/NO_FILE")
-
     // Placeholder baseline: every sample gets NO_FILE. If taxonomy runs, real
     // summaries override the placeholder. This works whether taxonomy is off,
     // on-for-all-samples, or on-but-skipped-for-some — and avoids the empty-
