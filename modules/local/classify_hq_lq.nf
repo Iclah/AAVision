@@ -1,5 +1,6 @@
 // CLASSIFY_HQ_LQ: split mapped vector reads into high- and low-quality by
-// per-read alignment coverage. Needs the vector SAM and vector.fastq.
+// merged primary + supplementary read coverage; snapbacks are LQ.
+// Needs the vector SAM and vector.fastq.
 
 process CLASSIFY_HQ_LQ {
     tag "${meta.id}"
@@ -13,6 +14,7 @@ process CLASSIFY_HQ_LQ {
     input:
     tuple val(meta), path(sam), path(vector_fastq)
     val min_coverage
+    val snapback_overlap
 
     output:
     tuple val(meta), path("vector_HQ.fastq"), emit: hq
@@ -25,6 +27,7 @@ process CLASSIFY_HQ_LQ {
         --vector-fastq ${vector_fastq} \\
         --out-hq vector_HQ.fastq \\
         --out-lq vector_LQ.fastq \\
-        --min-coverage ${min_coverage}
+        --min-coverage ${min_coverage} \\
+        --snapback-overlap ${snapback_overlap}
     """
 }

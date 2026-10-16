@@ -79,6 +79,9 @@ Expected run directory layout:
                         'optionally contains references/ with shared refs)')
     p.add_argument('-q', '--quality', type=float, default=90.0,
                    help='Minimum alignment coverage for HQ reads (default: 90%%)')
+    p.add_argument('--snapback-overlap', type=int, default=200,
+                   help='Opposite-strand vector overlap (bp) that makes a read a '
+                        'snapback, which is LQ (default: 200, above ITR length)')
     p.add_argument('--min-length', type=int, default=0,
                    help='Minimum read length filter in bp (default: 0 = off). '
                         'Filtered reads go to merged.filtered.fastq.gz; '
@@ -147,6 +150,7 @@ def _add_step_subparsers(subparsers):
     p.add_argument('--out-hq', required=True)
     p.add_argument('--out-lq', required=True)
     p.add_argument('--min-coverage', type=float, default=0.9)
+    p.add_argument('--snapback-overlap', type=int, default=200)
 
     # align-ref (generic)
     p = subparsers.add_parser('align-ref',
@@ -287,7 +291,8 @@ def analyze_single_sample(fastq_path: str, sample_name: str, output_dir: str,
                           verbose: bool, kraken_db: str = None,
                           kraken_confidence: float = 0.05,
                           bracken_level: str = 'S',
-                          bracken_threshold: int = 10) -> dict:
+                          bracken_threshold: int = 10,
+                          snapback_overlap: int = 200) -> dict:
     """
     Run full analysis pipeline for a single sample.
     
@@ -297,6 +302,7 @@ def analyze_single_sample(fastq_path: str, sample_name: str, output_dir: str,
         output_dir: Output directory for this sample
         refs: Dictionary of reference file paths
         quality: Minimum coverage threshold (0-100)
+        snapback_overlap: Opposite-strand vector overlap (bp) that makes a read a snapback (LQ)
         threads: Number of threads for alignment
         verbose: Enable verbose logging
         kraken_db: Path to Kraken2 database (optional, skips taxonomy if None)
@@ -333,7 +339,7 @@ def analyze_single_sample(fastq_path: str, sample_name: str, output_dir: str,
     
     min_coverage = quality / 100.0
     hq_fastq, lq_fastq, hq_count, lq_count = classification.classify_vector_reads(
-        vector_sam, vector_fastq, dirs['fastq'], min_coverage
+        vector_sam, vector_fastq, dirs['fastq'], min_coverage, snapback_overlap
     )
     
     # Extract unmapped reads
@@ -684,6 +690,7 @@ def run_pipeline(args):
     print(f"Output directory:    {args.output}")
     print(f"Number of samples:   {len(samples)}")
     print(f"Coverage threshold:  {args.quality}%")
+    print(f"Snapback overlap:    {args.snapback_overlap} bp")
     print(f"Threads:             {args.threads}")
     if args.kraken_db:
         print(f"Kraken2 database:    {args.kraken_db}")
@@ -764,7 +771,8 @@ def run_pipeline(args):
                 kraken_db=args.kraken_db,
                 kraken_confidence=args.kraken_confidence,
                 bracken_level=args.bracken_level,
-                bracken_threshold=args.bracken_threshold
+                bracken_threshold=args.bracken_threshold,
+                snapback_overlap=args.snapback_overlap
             )
 
             sample_elapsed = time.time() - sample_start_time

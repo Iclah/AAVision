@@ -143,6 +143,10 @@ workflow {
     // single-word param so it needs no kebab/camel reconciliation.
     def min_coverage = (params.quality as String).toBigDecimal() / 100.0
 
+    // Snapback overlap (bp) for the HQ/LQ split; same kebab/camel
+    // reconciliation as min_length (--snapback-overlap -> snapbackOverlap).
+    def snapback_overlap = params.containsKey('snapbackOverlap') ? params.snapbackOverlap : params.snapback_overlap
+
     samples_ch = channel
         .fromPath(params.input, checkIfExists: true)
         .splitCsv(header: true)
@@ -184,7 +188,7 @@ workflow {
         .join(EXTRACT_VECTOR.out.vector_fastq)
         .map { meta, sam, vector_fastq -> tuple(meta, sam, vector_fastq) }
 
-    CLASSIFY_HQ_LQ(classify_hq_lq_in, min_coverage)
+    CLASSIFY_HQ_LQ(classify_hq_lq_in, min_coverage, snapback_overlap)
 
     // --- Steps 5+7: combined fan-out — align LQ reads (hybrid) AND unmapped
     // reads (impurity) to each impurity reference. A process can only be

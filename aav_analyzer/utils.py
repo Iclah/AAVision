@@ -702,3 +702,24 @@ def resolve_sample_references(sample_dir: str, run_dir: str,
         logging.info(f"[{sample_name}]   {ref_name}: not provided (skipped)")
     
     return resolved
+
+
+def merge_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """
+    Sort and merge 0-based half-open (start, end) intervals.
+
+    Overlapping and touching intervals ([0,10) and [10,20)) are merged.
+
+    Args:
+        intervals: (start, end) pairs, any order
+
+    Returns:
+        Sorted, non-overlapping (start, end) pairs
+    """
+    merged = []
+    for start, end in sorted(intervals):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged

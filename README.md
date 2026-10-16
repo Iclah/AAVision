@@ -93,7 +93,8 @@ samplesheet fails to parse.
 |-----------|---------|-------------|
 | `--input` | (required) | Path to the samplesheet CSV |
 | `--outdir` | `results` | Directory for published outputs |
-| `--quality` | `90` | Minimum alignment coverage (%) for high-quality vector reads |
+| `--quality` | `90` | Minimum read coverage (%) by the vector alignments (primary + supplementary) for high-quality vector reads |
+| `--snapback-overlap` | `200` | Reads with two vector alignments on opposite strands overlapping by at least this many bp are snapbacks and count as low-quality |
 | `--min-length` | `0` | Minimum read length filter in bp (`0` = off) |
 | `--kraken_db` | `null` | Path to a Kraken2 database directory. If unset, taxonomy is skipped |
 | `--kraken_confidence` | `0.05` | Kraken2 confidence threshold |
@@ -151,7 +152,9 @@ with Plotly, so viewing the report requires an internet connection. An example r
 1. **Vector alignment** — reads are aligned to the vector reference with
    minimap2; mapped and unmapped reads are separated.
 2. **Quality classification** — mapped reads are split into high- and
-   low-quality by alignment coverage (default ≥90%).
+   low-quality by how much of the read the vector alignments cover, primary
+   and supplementary combined (default ≥90%). Snapbacks (a vector region
+   followed by its own reverse complement) are low-quality.
 3. **Hybrid detection** — low-quality vector reads are aligned to the other
    references and assigned to the best-matching one.
 4. **Impurity detection** — unmapped reads are aligned to all references and
