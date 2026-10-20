@@ -227,7 +227,7 @@ with Plotly, so viewing the report requires an internet connection. An example r
 ```
 main.nf                  # workflow entry point
 nextflow.config          # parameters and configuration
-modules/local/           # one Nextflow process per file
+modules/                 # one Nextflow process per file
 assets/                  # samplesheet example, placeholder files
 test_data/               # bundled test dataset for -profile test
 scripts/                 # make_test_profile_data.py builds test_data/

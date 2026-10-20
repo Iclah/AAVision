@@ -24,19 +24,19 @@
 ============================================================
 */
 
-include { PREPARE_FASTQ }  from './modules/local/prepare_fastq.nf'
-include { ALIGN_VECTOR }   from './modules/local/align_vector.nf'
-include { EXTRACT_VECTOR } from './modules/local/extract_vector.nf'
-include { CLASSIFY_HQ_LQ } from './modules/local/classify_hq_lq.nf'
-include { ALIGN_REF }      from './modules/local/align_ref.nf'
-include { REF_HOMOLOGY }   from './modules/local/ref_homology.nf'
-include { CLASSIFY_BEST }  from './modules/local/classify_best.nf'
-include { COMPUTE_TRUNCATION } from './modules/local/compute_truncation.nf'
-include { COMPUTE_COVERAGE }   from './modules/local/compute_coverage.nf'
-include { COMPUTE_LENGTHS }    from './modules/local/compute_lengths.nf'
-include { TAXONOMY }           from './modules/local/taxonomy.nf'
-include { SUMMARIZE }          from './modules/local/summarize.nf'
-include { GENERATE_REPORT }    from './modules/local/generate_report.nf'
+include { PREPARE_FASTQ }  from './modules/prepare_fastq.nf'
+include { ALIGN_VECTOR }   from './modules/align_vector.nf'
+include { EXTRACT_VECTOR } from './modules/extract_vector.nf'
+include { CLASSIFY_HQ_LQ } from './modules/classify_hq_lq.nf'
+include { ALIGN_REF }      from './modules/align_ref.nf'
+include { REF_HOMOLOGY }   from './modules/ref_homology.nf'
+include { CLASSIFY_BEST }  from './modules/classify_best.nf'
+include { COMPUTE_TRUNCATION } from './modules/compute_truncation.nf'
+include { COMPUTE_COVERAGE }   from './modules/compute_coverage.nf'
+include { COMPUTE_LENGTHS }    from './modules/compute_lengths.nf'
+include { TAXONOMY }           from './modules/taxonomy.nf'
+include { SUMMARIZE }          from './modules/summarize.nf'
+include { GENERATE_REPORT }    from './modules/generate_report.nf'
 
 // ------------------------------------------------------------
 // Resolve one samplesheet path cell. A literal '${projectDir}' token is
