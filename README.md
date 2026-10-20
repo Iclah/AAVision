@@ -17,6 +17,22 @@ with Kraken2/Bracken, and produces an interactive HTML report. **[View an exampl
 
 No other local installation is required — the tools live in the container.
 
+### Windows (WSL 2)
+
+The workflow runs under WSL 2 (Ubuntu). Either install Docker Desktop for
+Windows and enable *Settings → Resources → WSL integration* for your
+distribution, or install Docker Engine inside the distribution. Check that
+`docker run hello-world` works from the WSL shell before running the workflow
+(if it reports a permission error, add your user to the `docker` group:
+`sudo usermod -aG docker $USER`, then open a new shell).
+
+Keep the data, the Nextflow `work/` directory and the results on the Linux
+filesystem (e.g. `~/aav_runs/...`), not on a Windows drive under `/mnt/c/...`:
+file access across the Windows mount is much slower, and Linux file
+permissions (`chmod`) do not work there, which can make container steps
+fail. WSL 2 gets about half of the Windows RAM by default; to give it more,
+set `memory=` in `%UserProfile%\.wslconfig` and run `wsl --shutdown`.
+
 ## Quick start
 
 You need [Nextflow](https://www.nextflow.io/) and [Docker](https://www.docker.com/)
@@ -61,6 +77,28 @@ nextflow run main.nf -profile docker --input samplesheet.csv \
   --outdir results --min-length 300 --container aavision:dev
 ```
 
+## Test the installation
+
+The repository ships a small test dataset (`test_data/`: 20,000 reads from an
+AAV9 CMV-GFP-luciferase prep, the matching references, and a 1.8 Mb subset of
+GRCh38 as host). Run it with the `test` profile:
+
+```bash
+nextflow run Iclah/AAVision -r main -profile test,docker
+```
+
+or, from a local clone, `nextflow run main.nf -profile test,docker`. It needs
+no samplesheet or reference files of your own, takes about a minute once the
+container image is pulled (tasks are capped at 4 CPUs and 8 GB; peak use is
+well under 1 GB), and writes the report to
+`results_test/test_AAV9_CMV-GFP-Luc/analysis_report.html`. Taxonomy is
+skipped, since it needs a 100+ GB Kraken2 database.
+
+This is a check that the installation works, not a validation: because the host
+reference is only the regions the test reads align to, a few reads can align
+differently than against the full genome and the numbers differ slightly from a
+full-host run. See `test_data/README.md` for how the dataset was made.
+
 ## Samplesheet
 
 A comma-separated file with one row per sample. The `fastq` column points at a
@@ -69,7 +107,7 @@ automatically. Reference columns are explicit per row.
 
 ```csv
 sample,fastq,vector,backbone,helper,host,rep_cap,spike_in
-vKUL156,/data/run1/vKUL156/fastq_pass,/data/refs/vector.fasta,/data/refs/backbone.fasta,/data/refs/helper.fasta,/data/refs/host.fasta,/data/refs/rep_cap.fasta,
+sample1,/data/run1/sample1/fastq_pass,/data/refs/vector.fasta,/data/refs/backbone.fasta,/data/refs/helper.fasta,/data/refs/host.fasta,/data/refs/rep_cap.fasta,
 ```
 
 | Column | Required | Description |
@@ -82,6 +120,10 @@ vKUL156,/data/run1/vKUL156/fastq_pass,/data/refs/vector.fasta,/data/refs/backbon
 | `host` | yes | Host genome reference FASTA |
 | `rep_cap` | no | Rep/Cap reference FASTA (leave blank to skip) |
 | `spike_in` | no | Spike-in reference FASTA (leave blank to skip) |
+
+Paths can be absolute or relative to the directory you launch Nextflow from.
+A literal `${projectDir}` in a path is replaced with the pipeline directory;
+the bundled `test_data/samplesheet.csv` uses this so it works from anywhere.
 
 The file must be comma-separated. Some spreadsheet applications export
 semicolon-separated CSVs on non-US locales — check the delimiter if the
@@ -120,6 +162,13 @@ supplied. Kraken2 memory-maps the entire database into RAM, so this step
 requires a machine sized to the database (a standard database is 100+ GB). The
 memory request is sized automatically from the database; on a machine that
 cannot provide it the step fails clearly rather than silently under-provisioning.
+
+Prebuilt Kraken2 databases can be downloaded from the
+[Kraken2 index collection](https://benlangmead.github.io/aws-indexes/k2)
+(e.g. Standard, PlusPF, PlusPFP; the capped `-8` and `-16` variants fit in
+8 or 16 GB of RAM at some loss of sensitivity). Unpack the archive and pass the
+directory to `--kraken_db`. The archives also contain the Bracken
+`databaseXmers.kmer_distrib` files the Bracken step needs.
 
 To reproduce a specific read length (e.g. matching the read-length peak of your
 data), set `--bracken_read_length` to a value the Bracken database was built for.
@@ -180,6 +229,8 @@ main.nf                  # workflow entry point
 nextflow.config          # parameters and configuration
 modules/local/           # one Nextflow process per file
 assets/                  # samplesheet example, placeholder files
+test_data/               # bundled test dataset for -profile test
+scripts/                 # make_test_profile_data.py builds test_data/
 env.yaml                 # pinned container dependencies
 AAV_analyzer.dockerfile  # container definition
 aav_analyze.py           # CLI the processes invoke inside the container
