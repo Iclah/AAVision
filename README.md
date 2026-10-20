@@ -17,22 +17,6 @@ with Kraken2/Bracken, and produces an interactive HTML report. **[View an exampl
 
 No other local installation is required — the tools live in the container.
 
-### Windows (WSL 2)
-
-The workflow runs under WSL 2 (Ubuntu). Either install Docker Desktop for
-Windows and enable *Settings → Resources → WSL integration* for your
-distribution, or install Docker Engine inside the distribution. Check that
-`docker run hello-world` works from the WSL shell before running the workflow
-(if it reports a permission error, add your user to the `docker` group:
-`sudo usermod -aG docker $USER`, then open a new shell).
-
-Keep the data, the Nextflow `work/` directory and the results on the Linux
-filesystem (e.g. `~/aav_runs/...`), not on a Windows drive under `/mnt/c/...`:
-file access across the Windows mount is much slower, and Linux file
-permissions (`chmod`) do not work there, which can make container steps
-fail. WSL 2 gets about half of the Windows RAM by default; to give it more,
-set `memory=` in `%UserProfile%\.wslconfig` and run `wsl --shutdown`.
-
 ## Quick start
 
 You need [Nextflow](https://www.nextflow.io/) and [Docker](https://www.docker.com/)
@@ -142,6 +126,9 @@ samplesheet fails to parse.
 By default the workflow uses whatever the machine provides. To cap resources
 (e.g. on a laptop or a memory-limited VM), uncomment and set `resourceLimits` in
 `nextflow.config`. This is documented inline in that file.
+
+Alignment memory scales with reference size: a human host genome needs about
+17 GB, so on smaller machines set `resourceLimits` to the available memory.
 
 ### Taxonomy (optional)
 
