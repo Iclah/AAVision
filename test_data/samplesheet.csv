@@ -1,0 +1,2 @@
+sample,fastq,vector,backbone,helper,host,rep_cap,spike_in
+test_AAV9_CMV-GFP-Luc,${projectDir}/test_data/reads,${projectDir}/test_data/references/vector.fasta,${projectDir}/test_data/references/backbone.fasta,${projectDir}/test_data/references/helper.fasta,${projectDir}/test_data/references/host_subset.fasta,${projectDir}/test_data/references/rep_cap.fasta,
