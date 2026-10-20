@@ -18,6 +18,9 @@
    host      - path to host genome reference FASTA
    rep_cap   - (optional) path to rep/cap reference FASTA; leave blank if absent
    spike_in  - (optional) path to spike-in reference FASTA; leave blank if absent
+
+ A literal ${projectDir} in a path cell is replaced with the pipeline
+ directory, so bundled samplesheets (test_data/) work from any launch dir.
 ============================================================
 */
 
@@ -34,6 +37,15 @@ include { COMPUTE_LENGTHS }    from './modules/local/compute_lengths.nf'
 include { TAXONOMY }           from './modules/local/taxonomy.nf'
 include { SUMMARIZE }          from './modules/local/summarize.nf'
 include { GENERATE_REPORT }    from './modules/local/generate_report.nf'
+
+// ------------------------------------------------------------
+// Resolve one samplesheet path cell. A literal '${projectDir}' token is
+// replaced with the pipeline directory; other paths are used as given
+// (absolute, or relative to the launch directory).
+// ------------------------------------------------------------
+def resolve_path(cell) {
+    return file(cell.trim().replace('${projectDir}', projectDir.toString()), checkIfExists: true)
+}
 
 // ------------------------------------------------------------
 // Parse one samplesheet row into [ meta, fastq_dir, refs ]
@@ -55,18 +67,18 @@ def parse_row(row) {
     }
 
     def meta = [ id: row.sample.trim() ]
-    def fastq_dir = file(row.fastq.trim(), checkIfExists: true)
+    def fastq_dir = resolve_path(row.fastq)
 
     def refs = [:]
-    refs.vector   = file(row.vector.trim(),   checkIfExists: true)
-    refs.backbone = file(row.backbone.trim(), checkIfExists: true)
-    refs.helper   = file(row.helper.trim(),   checkIfExists: true)
-    refs.host     = file(row.host.trim(),     checkIfExists: true)
+    refs.vector   = resolve_path(row.vector)
+    refs.backbone = resolve_path(row.backbone)
+    refs.helper   = resolve_path(row.helper)
+    refs.host     = resolve_path(row.host)
     if (row.rep_cap?.trim()) {
-        refs.rep_cap = file(row.rep_cap.trim(), checkIfExists: true)
+        refs.rep_cap = resolve_path(row.rep_cap)
     }
     if (row.spike_in?.trim()) {
-        refs.spike_in = file(row.spike_in.trim(), checkIfExists: true)
+        refs.spike_in = resolve_path(row.spike_in)
     }
 
     return [ meta, fastq_dir, refs ]
