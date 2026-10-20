@@ -15,6 +15,7 @@ work/
 .nextflow.log*
 results/
 results_nf/
+results_test/
 
 # Python
 __pycache__/
