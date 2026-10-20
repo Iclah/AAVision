@@ -7,8 +7,9 @@ process ALIGN_REF {
 
     publishDir { "${params.outdir}/${meta.id}/bam" }, mode: 'copy', pattern: "alignments_*.bam*"
 
+    // Memory scales with reference size (map-ont index); gzipped FASTA counted as ~4x
     cpus   4
-    memory 8.GB
+    memory { "${(ref.size() * (ref.name.endsWith('.gz') ? 4 : 1) * 4 / 1_000_000_000).intValue() + 2} GB" }
     time   1.h
 
     input:

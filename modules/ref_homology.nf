@@ -10,9 +10,9 @@ process REF_HOMOLOGY {
 
     publishDir { "${params.outdir}/${meta.id}/homology" }, mode: 'copy'
 
-    // Same footprint as ALIGN_REF: indexing the host genome dominates
+    // Memory scales with reference size (asm20 index); gzipped FASTA counted as ~4x
     cpus   4
-    memory 8.GB
+    memory { "${(ref.size() * (ref.name.endsWith('.gz') ? 4 : 1) * 5 / 1_000_000_000).intValue() + 2} GB" }
     time   1.h
 
     input:
