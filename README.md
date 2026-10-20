@@ -46,7 +46,8 @@ straight from GitHub:
 nextflow run Iclah/AAVision -r v1.0.2 -profile docker \
   --input samplesheet.csv \
   --outdir results \
-  --min-length 300
+  --kraken_db /path/to/kraken2_db \
+  --min-length 50
 ```
 
 `-r v1.0.2` pins a specific release. On the first run, Nextflow downloads the
