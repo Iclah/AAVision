@@ -7,6 +7,7 @@ tests/
 pytest.ini
 scripts/make_hq_lq_testdata.py
 scripts/make_hybrid_testdata.py
+scripts/make_test_profile_data.py
 .pytest_cache/
 
 # Nextflow run artifacts

@@ -79,25 +79,12 @@ nextflow run main.nf -profile docker --input samplesheet.csv \
 
 ## Test the installation
 
-The repository ships a small test dataset (`test_data/`: 20,000 reads from an
-AAV9 CMV-GFP-luciferase prep, the matching references, and a 1.8 Mb subset of
-GRCh38 as host). Run it with the `test` profile:
-
 ```bash
 nextflow run Iclah/AAVision -r main -profile test,docker
 ```
 
-or, from a local clone, `nextflow run main.nf -profile test,docker`. It needs
-no samplesheet or reference files of your own, takes about a minute once the
-container image is pulled (tasks are capped at 4 CPUs and 8 GB; peak use is
-well under 1 GB), and writes the report to
-`results_test/test_AAV9_CMV-GFP-Luc/analysis_report.html`. Taxonomy is
-skipped, since it needs a 100+ GB Kraken2 database.
-
-This is a check that the installation works, not a validation: because the host
-reference is only the regions the test reads align to, a few reads can align
-differently than against the full genome and the numbers differ slightly from a
-full-host run. See `test_data/README.md` for how the dataset was made.
+Runs a small bundled dataset (`test_data/`) without taxonomy and writes
+`results_test/test/analysis_report.html`.
 
 ## Samplesheet
 
@@ -230,7 +217,6 @@ nextflow.config          # parameters and configuration
 modules/                 # one Nextflow process per file
 assets/                  # samplesheet example, placeholder files
 test_data/               # bundled test dataset for -profile test
-scripts/                 # make_test_profile_data.py builds test_data/
 env.yaml                 # pinned container dependencies
 AAV_analyzer.dockerfile  # container definition
 aav_analyze.py           # CLI the processes invoke inside the container
